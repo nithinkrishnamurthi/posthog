@@ -24,6 +24,7 @@ from posthog.hogql_queries.ai.vector_search_query_runner import LATEST_ACTIONS_E
 from posthog.temporal.ai import SyncVectorsInputs
 from posthog.temporal.ai.sync_vectors import EmbeddingVersion
 from posthog.temporal.ai.video_segment_clustering.schedule import create_video_segment_clustering_coordinator_schedule
+from posthog.temporal.alerts.schedule import create_schedule_all_alert_checks_schedule
 from posthog.temporal.common.client import async_connect
 from posthog.temporal.common.schedule import a_create_schedule, a_schedule_exists, a_update_schedule
 from posthog.temporal.data_imports.signals.conversations_schedule import (
@@ -532,6 +533,7 @@ schedules = [
     create_conversations_signals_coordinator_schedule,
     create_wa_weekly_digest_schedule,
     create_logs_alert_check_schedule,
+    create_schedule_all_alert_checks_schedule,
 ]
 
 if settings.EE_AVAILABLE:
