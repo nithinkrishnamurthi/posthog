@@ -679,3 +679,6 @@ tools:
                 - content_snapshot
                 - recipient_results
                 - error
+    dashboard-templates-copy-between-projects-create:
+        operation: dashboard_templates_copy_between_projects_create
+        enabled: false
