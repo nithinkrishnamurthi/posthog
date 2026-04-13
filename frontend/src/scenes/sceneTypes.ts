@@ -32,6 +32,7 @@ export enum Scene {
     CustomerJourneyBuilder = 'CustomerJourneyBuilder',
     Dashboard = 'Dashboard',
     Dashboards = 'Dashboards',
+    DashboardTemplateCopy = 'DashboardTemplateCopy',
     DataManagement = 'DataManagement',
     DataPipelinesNew = 'DataPipelinesNew',
     DataOps = 'DataOps',
@@ -300,6 +301,7 @@ export const sceneToAccessControlResourceType: Partial<Record<Scene, AccessContr
     // Dashboards
     [Scene.Dashboard]: AccessControlResourceType.Dashboard,
     [Scene.Dashboards]: AccessControlResourceType.Dashboard,
+    [Scene.DashboardTemplateCopy]: AccessControlResourceType.DashboardTemplate,
 
     // Insights
     [Scene.Insight]: AccessControlResourceType.Insight,
