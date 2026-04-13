@@ -35,7 +35,15 @@ from ee.hogai.session_summaries.session.output_data import (
 from ee.hogai.session_summaries.utils import load_custom_template
 from ee.hogai.utils.yaml import load_yaml_from_raw_llm_content
 from ee.hogai.videos.session_moments import SessionMomentInput, SessionMomentsLLMAnalyzer
-from ee.models.session_summaries import SessionSummaryRunMeta, SessionSummaryVisualConfirmationResult
+from ee.models.session_summaries import (
+    ExtraSummaryContext,
+    SessionSummaryRunMeta,
+    SessionSummaryVisualConfirmationResult,
+)
+
+# Truncate product context fed to Gemini's video observation step, which is meant to be purely factual.
+# Just enough to orient Gemini on what product is on screen, without inviting interpretive drift.
+VIDEO_DESCRIPTION_PRODUCT_CONTEXT_MAX_CHARS = 500
 
 if TYPE_CHECKING:
     from ee.hogai.videos.session_moments import SessionMomentOutput
@@ -62,6 +70,7 @@ class SessionSummaryVideoValidator:
         team_id: int,
         user: User,
         trace_id: str | None = None,
+        extra_summary_context: ExtraSummaryContext | None = None,
     ) -> None:
         self.session_id = session_id
         self.team_id = team_id
@@ -69,6 +78,7 @@ class SessionSummaryVideoValidator:
         self.summary = summary
         self.run_metadata = run_metadata
         self.trace_id = trace_id
+        self.extra_summary_context = extra_summary_context
         self.moments_analyzer = SessionMomentsLLMAnalyzer(
             session_id=session_id, team_id=team_id, user=user, trace_id=trace_id
         )
@@ -120,10 +130,18 @@ class SessionSummaryVideoValidator:
     def _generate_video_description_prompt(self, event: EnrichedKeyActionSerializer) -> str:
         """Generate a prompt for validating a video"""
         template_dir = Path(__file__).parent / "templates" / "video-validation"
+        product_context_brief = None
+        if self.extra_summary_context and self.extra_summary_context.product_context:
+            product_context_brief = self.extra_summary_context.product_context[
+                :VIDEO_DESCRIPTION_PRODUCT_CONTEXT_MAX_CHARS
+            ]
         prompt = load_custom_template(
             template_dir,
             "description-prompt.djt",
-            {"EVENT_DESCRIPTION": event.data["description"]},
+            {
+                "EVENT_DESCRIPTION": event.data["description"],
+                "PRODUCT_CONTEXT_BRIEF": product_context_brief,
+            },
         )
         return prompt
 
@@ -247,9 +265,11 @@ class SessionSummaryVideoValidator:
             },
         )
         # Get system prompt
+        product_context = self.extra_summary_context.product_context if self.extra_summary_context else None
         system_prompt = load_custom_template(
             template_dir,
             "validation-system-prompt.djt",
+            {"PRODUCT_CONTEXT": product_context},
         )
         return prompt, system_prompt
 

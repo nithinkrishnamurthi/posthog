@@ -51,6 +51,7 @@ async def validate_llm_single_session_summary_with_videos_activity(
         team_id=inputs.team_id,
         user=user,
         trace_id=temporalio.activity.info().workflow_id,
+        extra_summary_context=inputs.extra_summary_context,
     )
     video_validation_result = await video_validator.validate_session_summary_with_videos(
         model_to_use=inputs.model_to_use
