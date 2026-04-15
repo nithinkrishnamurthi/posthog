@@ -1,6 +1,5 @@
 import os
 import asyncio
-import dataclasses
 from datetime import datetime
 from typing import Any, Literal, cast
 
@@ -112,23 +111,6 @@ class SessionSummariesViewSet(TeamAndOrgViewSetMixin, GenericViewSet):
         if focus_area:
             extra_summary_context = ExtraSummaryContext(focus_area=focus_area)
         return session_ids, min_timestamp, max_timestamp, extra_summary_context
-
-    def _merge_team_product_context(
-        self, extra_summary_context: ExtraSummaryContext | None
-    ) -> ExtraSummaryContext | None:
-        """
-        Merge the team's stored product_context into the per-request ExtraSummaryContext.
-
-        Only called from the single-session replay page flow. Group summaries and other
-        entry points (Max tool, CLI) intentionally do not pick up team-level product context.
-        """
-        team_config = get_or_create_team_extension(self.team, TeamSessionSummariesConfig)
-        product_context = (team_config.product_context or "").strip()
-        if not product_context:
-            return extra_summary_context
-        if extra_summary_context is None:
-            return ExtraSummaryContext(product_context=product_context)
-        return dataclasses.replace(extra_summary_context, product_context=product_context)
 
     def _determine_video_validation_enabled(self, user: User) -> bool | Literal["full"]:
         """
@@ -333,9 +315,6 @@ class SessionSummariesViewSet(TeamAndOrgViewSetMixin, GenericViewSet):
     def create_session_summaries_individually(self, request: Request, **kwargs) -> Response:
         user = self._validate_user(request)
         session_ids, _, _, extra_summary_context = self._validate_input(request)
-        # Layer the team's stored product_context on top of any per-request context.
-        # Only applied to the single-session replay page flow — group summaries stay untouched.
-        extra_summary_context = self._merge_team_product_context(extra_summary_context)
         video_validation_enabled = self._determine_video_validation_enabled(user)
         tracking_id = generate_tracking_id()
         capture_session_summary_started(
