@@ -2140,7 +2140,9 @@ class TestSessionRecordings(APIBaseTest, ClickhouseTestMixin, QueryMatchingTest)
             assert call_kwargs["team"] == self.team
             mock_stream_summary.assert_not_called()
         else:
-            mock_stream_summary.assert_called_once_with(session_id=session_id, user=self.user, team=self.team)
+            mock_stream_summary.assert_called_once_with(
+                session_id=session_id, user=self.user, team=self.team, extra_summary_context=None
+            )
             mock_execute_summarize.assert_not_called()
 
     @patch(
