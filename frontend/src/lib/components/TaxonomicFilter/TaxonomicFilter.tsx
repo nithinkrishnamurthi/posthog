@@ -51,6 +51,8 @@ export function TaxonomicFilter({
     definitionPopoverRenderer,
     minSearchQueryLength,
     suggestedFiltersLabel,
+    hideSearchInput,
+    searchQuery: controlledSearchQuery,
 }: TaxonomicFilterProps): JSX.Element {
     // Generate a unique key for each unique TaxonomicFilter that's rendered
     const taxonomicFilterLogicKey = useMemo(
@@ -91,7 +93,14 @@ export function TaxonomicFilter({
 
     const logic = taxonomicFilterLogic(taxonomicFilterLogicProps)
     const { activeTab } = useValues(logic)
+    const { setSearchQuery } = useActions(logic)
     const [refReady, setRefReady] = useState(false)
+
+    useEffect(() => {
+        if (controlledSearchQuery !== undefined) {
+            setSearchQuery(controlledSearchQuery)
+        }
+    }, [controlledSearchQuery, setSearchQuery])
 
     useEffect(() => {
         if (groupType !== TaxonomicFilterGroupType.HogQLExpression) {
@@ -124,7 +133,8 @@ export function TaxonomicFilter({
                 // eslint-disable-next-line react/forbid-dom-props
                 style={style}
             >
-                {activeTab !== TaxonomicFilterGroupType.HogQLExpression || taxonomicGroupTypes.length > 1 ? (
+                {!hideSearchInput &&
+                (activeTab !== TaxonomicFilterGroupType.HogQLExpression || taxonomicGroupTypes.length > 1) ? (
                     <div className="relative">
                         <TaxonomicFilterSearchInput searchInputRef={searchInputRef} onClose={onClose} />
                     </div>
