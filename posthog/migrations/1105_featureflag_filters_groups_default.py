@@ -15,7 +15,7 @@ class Migration(migrations.Migration):
             model_name="featureflag",
             name="filters",
             field=models.JSONField(
-                default=posthog.models.feature_flag.feature_flag._default_filters
+                default=posthog.models.feature_flag.feature_flag.default_filters
             ),
         ),
         # Idempotent backfill enforcing the groups-key invariant on existing rows.
