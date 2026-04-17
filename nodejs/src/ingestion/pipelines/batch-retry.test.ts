@@ -240,27 +240,30 @@ describe('withBatchRetry', () => {
             const wrapped = withBatchRetry(step, {
                 maxAttempts: 1,
                 retrySleepMs: 0,
-                circuitBreaker: { failureThreshold: 1, cooldownMs: 5000 },
+                circuitBreaker: { failureThreshold: 1 },
             })
 
             await expect(wrapped(['x'])).rejects.toBeInstanceOf(CircuitOpenError)
         })
 
-        it('throws CircuitOpenError without calling step when circuit is already open', async () => {
+        it('probes with one event when circuit is open and throws if probe fails', async () => {
             const step = createMockStep()
             step.mockResolvedValue([failed('down')])
 
             const wrapped = withBatchRetry(step, {
                 maxAttempts: 1,
                 retrySleepMs: 0,
-                circuitBreaker: { failureThreshold: 1, cooldownMs: 5000 },
+                circuitBreaker: { failureThreshold: 1 },
             })
 
+            // First call trips the circuit
             await expect(wrapped(['x'])).rejects.toBeInstanceOf(CircuitOpenError)
             step.mockClear()
 
-            await expect(wrapped(['y'])).rejects.toBeInstanceOf(CircuitOpenError)
-            expect(step).not.toHaveBeenCalled()
+            // Second call probes with 1 event, probe fails, throws without full retry
+            await expect(wrapped(['y', 'z'])).rejects.toBeInstanceOf(CircuitOpenError)
+            expect(step).toHaveBeenCalledTimes(1)
+            expect(step).toHaveBeenCalledWith(['y']) // only the probe event
         })
 
         it('resets circuit when some events succeed', async () => {
@@ -270,7 +273,7 @@ describe('withBatchRetry', () => {
             const wrapped = withBatchRetry(step, {
                 maxAttempts: 1,
                 retrySleepMs: 0,
-                circuitBreaker: { failureThreshold: 1, cooldownMs: 5000 },
+                circuitBreaker: { failureThreshold: 1 },
             })
 
             const results = await wrapped(['a', 'b'])
@@ -279,25 +282,31 @@ describe('withBatchRetry', () => {
             expect(isRedirectResult(results[1])).toBe(true)
         })
 
-        it('allows probe attempt after cooldown expires and recovers circuit on success', async () => {
+        it('recovers circuit when probe succeeds and processes full batch', async () => {
             const step = createMockStep()
             step.mockResolvedValue([failed('down')])
 
             const wrapped = withBatchRetry(step, {
                 maxAttempts: 1,
                 retrySleepMs: 0,
-                circuitBreaker: { failureThreshold: 1, cooldownMs: 1000 },
+                circuitBreaker: { failureThreshold: 1 },
             })
 
+            // Trip the circuit
             await expect(wrapped(['x'])).rejects.toBeInstanceOf(CircuitOpenError)
 
-            jest.advanceTimersByTime(1001)
+            // Next call: probe with 1 event succeeds, then full batch processes.
+            // Mock returns success for each input it receives.
+            step.mockImplementation((inputs: string[]) =>
+                Promise.resolve(inputs.map((i) => succeeded(`recovered-${i}`)))
+            )
+            const results = await wrapped(['a', 'b'])
 
-            step.mockResolvedValueOnce([succeeded('recovered')])
-            const results = await wrapped(['x'])
-
-            expect(results).toHaveLength(1)
+            // Probe (1 event) + full batch (2 events) = step called twice
+            expect(step).toHaveBeenCalledWith(['a']) // probe
+            expect(results).toHaveLength(2)
             expect(isOkResult(results[0])).toBe(true)
+            expect(isOkResult(results[1])).toBe(true)
         })
 
         it('throws CircuitOpenError on all-fail even without circuit breaker configured', async () => {

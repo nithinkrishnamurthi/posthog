@@ -3,8 +3,6 @@ import { logger } from '~/utils/logger'
 export interface CircuitBreakerConfig {
     /** Number of consecutive all-fail batches before tripping the circuit. */
     failureThreshold: number
-    /** Time in ms to wait before allowing a retry after the circuit trips. */
-    cooldownMs: number
 }
 
 /**
@@ -22,10 +20,10 @@ export class CircuitOpenError extends Error {
  * Circuit breaker for external service dependencies.
  *
  * Tracks consecutive all-fail batches. When the failure threshold is reached,
- * the circuit opens — indicating the service is likely down. After a cooldown
- * period, the circuit closes and allows a normal retry. If that also fails,
- * the failure count continues from where it left off and the circuit re-opens
- * immediately (threshold already reached).
+ * the circuit opens — indicating the service is likely down. The circuit
+ * stays open until recordSomeSucceeded() is called (typically after a
+ * successful probe). The failure count persists across open/close cycles,
+ * so a single failure after recovery re-opens the circuit immediately.
  *
  * Partial failures (some succeed, some fail) always reset the failure count
  * since they indicate the service is operational — the failures are from
@@ -34,29 +32,10 @@ export class CircuitOpenError extends Error {
 export class CircuitBreaker {
     private open: boolean = false
     private consecutiveFailures: number = 0
-    private lastFailureTime: number = 0
     private config: CircuitBreakerConfig
 
     constructor(config: CircuitBreakerConfig) {
         this.config = config
-    }
-
-    /**
-     * Check if requests should be attempted. Returns true if the circuit
-     * is closed or if enough time has passed since it opened.
-     */
-    shouldAttempt(): boolean {
-        if (!this.open) {
-            return true
-        }
-        if (Date.now() - this.lastFailureTime >= this.config.cooldownMs) {
-            this.open = false
-            logger.info('🔄', 'circuit_breaker_closed_for_retry', {
-                cooldownMs: this.config.cooldownMs,
-            })
-            return true
-        }
-        return false
     }
 
     /**
@@ -67,7 +46,6 @@ export class CircuitBreaker {
      */
     recordAllFailed(): boolean {
         this.consecutiveFailures++
-        this.lastFailureTime = Date.now()
 
         if (this.consecutiveFailures >= this.config.failureThreshold) {
             this.open = true

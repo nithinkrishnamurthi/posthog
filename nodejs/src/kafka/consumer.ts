@@ -363,35 +363,31 @@ export class KafkaConsumer {
     }
 
     /**
-     * Pause fetching for all assigned partitions. The consumer stays in the
-     * group and heartbeats continue, but `consume()` returns empty. Use
-     * `poll()` while paused to keep `max.poll.interval.ms` alive.
+     * Consume up to `count` messages. Resets the broker's
+     * `max.poll.interval.ms` timer, updates health check state, and records
+     * batch metrics. Safe to call from outside the main loop (e.g., during
+     * backpressure) — the consumer stays in the group and K8s health checks
+     * remain healthy.
+     *
+     * Wrapped in a retry check because despite being connected and ready,
+     * the client can still have a non-deterministic error when consuming.
      */
-    public pause(): void {
-        const assignments = this.assignments()
-        if (assignments.length > 0) {
-            this.rdKafkaConsumer.pause(assignments.map((a) => ({ topic: a.topic, partition: a.partition })))
-        }
-    }
+    public async consume(count: number): Promise<Message[]> {
+        const messages = await retryIfRetriable(() =>
+            promisifyCallback<Message[]>((cb) => this.rdKafkaConsumer.consume(count, cb))
+        )
 
-    /**
-     * Resume fetching for all assigned partitions after a `pause()`.
-     */
-    public resume(): void {
-        const assignments = this.assignments()
-        if (assignments.length > 0) {
-            this.rdKafkaConsumer.resume(assignments.map((a) => ({ topic: a.topic, partition: a.partition })))
-        }
-    }
-
-    /**
-     * Lightweight poll that resets the broker's `max.poll.interval.ms` timer
-     * without consuming messages. Call periodically while paused to prevent
-     * the broker from removing the consumer from the group.
-     */
-    public async poll(): Promise<void> {
-        await promisifyCallback<Message[]>((cb) => this.rdKafkaConsumer.consume(1, cb))
+        // Update heartbeat for backward compatibility with the legacy health
+        // check mechanism, and mark the consumer loop as alive for the newer
+        // loop-based health check.
         this.heartbeat()
+        this.lastConsumerLoopTime = Date.now()
+
+        gaugeBatchUtilization.labels({ groupId: this.config.groupId }).set(messages.length / count || 0)
+        histogramKafkaBatchSize.observe(messages.length)
+        histogramKafkaBatchSizeKb.observe(messages.reduce((acc, m) => (m.value?.length ?? 0) + acc, 0) / 1024)
+
+        return messages
     }
 
     public offsetsStore(topicPartitionOffsets: TopicPartitionOffset[]): void {
@@ -723,22 +719,10 @@ export class KafkaConsumer {
                         histogramKafkaConsumeInterval.labels({ topic, groupId }).observe(intervalMs)
                     }
                     lastConsumeTime = consumeStartTime
-                    // TRICKY: We wrap this in a retry check. It seems that despite being connected and ready, the client can still have an undeterministic
-                    // error when consuming, hence the retryIfRetriable.
-                    const messages = await retryIfRetriable(() =>
-                        promisifyCallback<Message[]>((cb) => this.rdKafkaConsumer.consume(this.fetchBatchSize, cb))
-                    )
 
-                    // After successfully pulling a batch, update heartbeat for backward compatibility
-                    this.heartbeat()
-
-                    gaugeBatchUtilization.labels({ groupId }).set(messages.length / this.fetchBatchSize)
+                    const messages = await this.consume(this.fetchBatchSize)
 
                     logger.debug('🔁', 'main_loop_consumed', { messagesLength: messages.length })
-                    histogramKafkaBatchSize.observe(messages.length)
-                    histogramKafkaBatchSizeKb.observe(
-                        messages.reduce((acc, m) => (m.value?.length ?? 0) + acc, 0) / 1024
-                    )
 
                     if (!messages.length && !callEachBatchWhenEmpty) {
                         logger.debug('🔁', 'main_loop_empty_batch', { cause: 'empty' })

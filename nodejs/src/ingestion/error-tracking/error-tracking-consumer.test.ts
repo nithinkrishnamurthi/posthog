@@ -17,14 +17,12 @@ import { ErrorTrackingConsumer, ErrorTrackingHogTransformer } from './error-trac
 
 /** Creates a mock KafkaConsumer for tests that don't need actual Kafka connections */
 const createMockKafkaConsumer = (): jest.Mocked<
-    Pick<KafkaConsumer, 'connect' | 'disconnect' | 'isHealthy' | 'pause' | 'resume' | 'poll' | 'heartbeat'>
+    Pick<KafkaConsumer, 'connect' | 'disconnect' | 'isHealthy' | 'consume' | 'heartbeat'>
 > => ({
     connect: jest.fn().mockResolvedValue(undefined),
     disconnect: jest.fn().mockResolvedValue(undefined),
     isHealthy: jest.fn().mockReturnValue({ status: 'ok' }),
-    pause: jest.fn(),
-    resume: jest.fn(),
-    poll: jest.fn().mockResolvedValue(undefined),
+    consume: jest.fn().mockResolvedValue([]),
     heartbeat: jest.fn(),
 })
 
@@ -162,8 +160,8 @@ describe('ErrorTrackingConsumer', () => {
             cymbalRetryMaxAttempts: 3,
             cymbalRetrySleepMs: 100,
             cymbalCircuitBreakerFailureThreshold: 5,
-            cymbalCircuitBreakerCooldownMs: 30_000,
-            cymbalCircuitBreakerPollIntervalMs: 10,
+            circuitBreakerInitialBackoffMs: 1_000,
+            circuitBreakerMaxBackoffMs: 30_000,
             lane: hub.INGESTION_LANE ?? ('main' as const),
             overflowEnabled:
                 !!hub.ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC &&
@@ -429,24 +427,94 @@ describe('ErrorTrackingConsumer', () => {
     })
 
     describe('circuit breaker', () => {
-        it('should pause, wait, and retry when all events fail', async () => {
-            // Restore real Date.now — the cooldown wait loop needs a real clock.
-            // Must use the module-level capture since the spy replaces Date.now.
+        it('should back off and retry when all events fail', async () => {
+            // Restore real Date.now — the backoff loop needs a real clock.
             ;(Date.now as jest.Mock).mockImplementation(realDateNow)
 
             // Use short timeouts so the test runs fast
-            consumer['config'].cymbalCircuitBreakerCooldownMs = 50
-            consumer['config'].cymbalCircuitBreakerPollIntervalMs = 10
+            consumer['config'].circuitBreakerInitialBackoffMs = 1
+            consumer['config'].circuitBreakerMaxBackoffMs = 10
             consumer['config'].cymbalRetryMaxAttempts = 1
             consumer['config'].cymbalRetrySleepMs = 1
             consumer['config'].cymbalCircuitBreakerFailureThreshold = 1
             await consumer['initializePipeline']()
 
             const cymbalClient = consumer['cymbalClient']
-            const kafkaConsumer = consumer['kafkaConsumer'] as unknown as ReturnType<typeof createMockKafkaConsumer>
+            const kafkaConsumer = consumer['kafkaConsumer']
+            jest.spyOn(kafkaConsumer, 'consume').mockResolvedValue([])
 
             // First call fails, triggering CircuitOpenError.
-            // After cooldown, the retry succeeds.
+            // After backoff, the probe and retry succeed.
+            let callCount = 0
+            jest.spyOn(cymbalClient, 'processExceptions').mockImplementation((items) => {
+                callCount++
+                if (callCount <= 2) {
+                    // First call: full batch fails. Second call: probe fails.
+                    return Promise.resolve(
+                        items.map(() => ({
+                            status: 'failed' as const,
+                            retriable: true,
+                            reason: 'service down',
+                        }))
+                    )
+                }
+                return Promise.resolve(
+                    items.map((item: any) => ({
+                        status: 'success' as const,
+                        response: {
+                            uuid: item.request.uuid,
+                            event: item.request.event,
+                            team_id: item.request.team_id,
+                            timestamp: item.request.timestamp,
+                            properties: {
+                                ...item.request.properties,
+                                $exception_fingerprint: `fingerprint-${item.request.uuid}`,
+                                $exception_issue_id: `issue-${item.request.uuid}`,
+                            },
+                        },
+                    }))
+                )
+            })
+
+            const messages = createKafkaMessages([createEvent()])
+            await consumer.handleKafkaBatch(messages)
+
+            // Verify consume(1) was called for keepalive during backoff
+            expect(kafkaConsumer.consume).toHaveBeenCalledWith(1)
+
+            // Verify the event was eventually processed and emitted
+            const producedMessages =
+                mockProducerObserver.getProducedKafkaMessagesForTopic('clickhouse_events_json_test')
+            expect(producedMessages).toHaveLength(1)
+            expect(producedMessages[0].value.event).toBe('$exception')
+        })
+
+        it('should include messages consumed during backoff in the retry batch', async () => {
+            ;(Date.now as jest.Mock).mockImplementation(realDateNow)
+
+            consumer['config'].circuitBreakerInitialBackoffMs = 1
+            consumer['config'].circuitBreakerMaxBackoffMs = 10
+            consumer['config'].cymbalRetryMaxAttempts = 1
+            consumer['config'].cymbalRetrySleepMs = 1
+            consumer['config'].cymbalCircuitBreakerFailureThreshold = 1
+            await consumer['initializePipeline']()
+
+            const cymbalClient = consumer['cymbalClient']
+            const kafkaConsumer = consumer['kafkaConsumer']
+
+            // During backoff, consume(1) returns a new message from the pre-fetch buffer
+            const extraEvent = createEvent({ uuid: new UUIDT().toString(), event: '$exception' })
+            const extraMessage = createKafkaMessages([extraEvent])[0]
+            let consumeCallCount = 0
+            jest.spyOn(kafkaConsumer, 'consume').mockImplementation(() => {
+                consumeCallCount++
+                // Return a message on the first keepalive call, empty after
+                if (consumeCallCount === 1) {
+                    return Promise.resolve([extraMessage])
+                }
+                return Promise.resolve([])
+            })
+
             let callCount = 0
             jest.spyOn(cymbalClient, 'processExceptions').mockImplementation((items) => {
                 callCount++
@@ -480,16 +548,10 @@ describe('ErrorTrackingConsumer', () => {
             const messages = createKafkaMessages([createEvent()])
             await consumer.handleKafkaBatch(messages)
 
-            // Verify the consumer paused, polled, and resumed during cooldown
-            expect(kafkaConsumer.pause).toHaveBeenCalled()
-            expect(kafkaConsumer.poll).toHaveBeenCalled()
-            expect(kafkaConsumer.resume).toHaveBeenCalled()
-
-            // Verify the event was eventually processed and emitted
+            // Both the original event and the event consumed during backoff should be emitted
             const producedMessages =
                 mockProducerObserver.getProducedKafkaMessagesForTopic('clickhouse_events_json_test')
-            expect(producedMessages).toHaveLength(1)
-            expect(producedMessages[0].value.event).toBe('$exception')
+            expect(producedMessages).toHaveLength(2)
         })
     })
 })

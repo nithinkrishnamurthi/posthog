@@ -41,10 +41,10 @@ export type ErrorTrackingConsumerConfig = {
     ERROR_TRACKING_CYMBAL_RETRY_SLEEP_MS: number
     /** Consecutive all-fail batches before the circuit breaker trips */
     ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_FAILURE_THRESHOLD: number
-    /** Cooldown in ms before allowing a probe batch after circuit trips */
-    ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_COOLDOWN_MS: number
-    /** Interval in ms between Kafka polls while waiting for circuit breaker cooldown */
-    ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_POLL_INTERVAL_MS: number
+    /** Initial backoff in ms when the circuit breaker trips */
+    ERROR_TRACKING_CIRCUIT_BREAKER_INITIAL_BACKOFF_MS: number
+    /** Maximum backoff in ms between circuit breaker probe attempts */
+    ERROR_TRACKING_CIRCUIT_BREAKER_MAX_BACKOFF_MS: number
 
     /** Pipeline name for metrics labeling */
     INGESTION_PIPELINE: string | null
@@ -70,8 +70,8 @@ export function getDefaultErrorTrackingConsumerConfig(): ErrorTrackingConsumerCo
         ERROR_TRACKING_CYMBAL_RETRY_MAX_ATTEMPTS: 3,
         ERROR_TRACKING_CYMBAL_RETRY_SLEEP_MS: 100,
         ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_FAILURE_THRESHOLD: 5,
-        ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_COOLDOWN_MS: 30_000,
-        ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_POLL_INTERVAL_MS: 5_000,
+        ERROR_TRACKING_CIRCUIT_BREAKER_INITIAL_BACKOFF_MS: 1_000,
+        ERROR_TRACKING_CIRCUIT_BREAKER_MAX_BACKOFF_MS: 30_000,
         INGESTION_PIPELINE: null,
         INGESTION_LANE: null,
     }

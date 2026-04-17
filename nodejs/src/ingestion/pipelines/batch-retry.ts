@@ -57,8 +57,9 @@ const circuitOpenCounter = new Counter({
  * DLQ routing, and optional circuit breaking.
  *
  * Behavior:
- * 1. If circuit is open and cooldown hasn't elapsed, throws CircuitOpenError
- *    (consumer pauses and waits for recovery)
+ * 1. If circuit is open, probes with a single input first. If the probe
+ *    fails, throws CircuitOpenError immediately (no wasted retries).
+ *    If it succeeds, closes the circuit and processes the full batch.
  * 2. Calls the step with all inputs
  * 3. Retries only the failed+retriable inputs up to maxAttempts
  * 4. After exhausting retries, classifies remaining failures:
@@ -66,8 +67,8 @@ const circuitOpenCounter = new Counter({
  *    - Retriable, but some events succeeded → overflow (service works,
  *      these events are problematic)
  *    - Retriable, ALL events failed → service is down, throw
- *      CircuitOpenError (consumer pauses, offsets not committed,
- *      events stay in partition for retry)
+ *      CircuitOpenError (consumer holds batch, keeps Kafka connection
+ *      alive, retries after backoff)
  */
 export function withBatchRetry<TIn, TOut, R extends string = never>(
     step: BatchRetryStep<TIn, TOut, R>,
@@ -82,9 +83,19 @@ export function withBatchRetry<TIn, TOut, R extends string = never>(
     const retryStep: BatchProcessingStep<TIn, TOut, OverflowOutput | DlqOutput | R> = async (
         inputs: TIn[]
     ): Promise<PipelineResult<TOut, OverflowOutput | DlqOutput | R>[]> => {
-        if (circuitBreaker && !circuitBreaker.shouldAttempt()) {
-            circuitOpenCounter.labels(stepName).inc()
-            throw new CircuitOpenError()
+        if (circuitBreaker?.isOpen()) {
+            // Probe with a single event — no retries, just one attempt.
+            // If the dependency is still down this fails fast instead of
+            // burning through maxAttempts × timeout for the full batch.
+            const probeResults = await step(inputs.slice(0, 1))
+            if (probeResults[0].status !== 'success') {
+                circuitOpenCounter.labels(stepName).inc()
+                throw new CircuitOpenError()
+            }
+            // Probe succeeded — close circuit and fall through to process
+            // the full batch normally. The probe event gets processed again
+            // (idempotent) but we avoid duplicating the result handling path.
+            circuitBreaker.recordSomeSucceeded()
         }
 
         const finalResults = await processWithRetries(inputs)

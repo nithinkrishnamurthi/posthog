@@ -194,9 +194,8 @@ export class ErrorTrackingServer implements NodeServer {
                     cymbalRetrySleepMs: this.config.ERROR_TRACKING_CYMBAL_RETRY_SLEEP_MS,
                     cymbalCircuitBreakerFailureThreshold:
                         this.config.ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_FAILURE_THRESHOLD,
-                    cymbalCircuitBreakerCooldownMs: this.config.ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_COOLDOWN_MS,
-                    cymbalCircuitBreakerPollIntervalMs:
-                        this.config.ERROR_TRACKING_CYMBAL_CIRCUIT_BREAKER_POLL_INTERVAL_MS,
+                    circuitBreakerInitialBackoffMs: this.config.ERROR_TRACKING_CIRCUIT_BREAKER_INITIAL_BACKOFF_MS,
+                    circuitBreakerMaxBackoffMs: this.config.ERROR_TRACKING_CIRCUIT_BREAKER_MAX_BACKOFF_MS,
                     lane: this.config.INGESTION_LANE ?? 'main',
                     overflowEnabled:
                         !!this.config.ERROR_TRACKING_CONSUMER_OVERFLOW_TOPIC &&

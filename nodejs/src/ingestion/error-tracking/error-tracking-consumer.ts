@@ -44,8 +44,8 @@ export interface ErrorTrackingConsumerOptions {
     cymbalRetryMaxAttempts: number
     cymbalRetrySleepMs: number
     cymbalCircuitBreakerFailureThreshold: number
-    cymbalCircuitBreakerCooldownMs: number
-    cymbalCircuitBreakerPollIntervalMs: number
+    circuitBreakerInitialBackoffMs: number
+    circuitBreakerMaxBackoffMs: number
     lane: IngestionLane
     overflowEnabled: boolean
     overflowBucketCapacity: number
@@ -218,7 +218,6 @@ export class ErrorTrackingConsumer {
                 retrySleepMs: this.config.cymbalRetrySleepMs,
                 circuitBreaker: {
                     failureThreshold: this.config.cymbalCircuitBreakerFailureThreshold,
-                    cooldownMs: this.config.cymbalCircuitBreakerCooldownMs,
                 },
             },
         })
@@ -252,12 +251,17 @@ export class ErrorTrackingConsumer {
     }
 
     /**
-     * Run the pipeline, handling CircuitOpenError by pausing consumption and
-     * retrying after cooldown. While paused, the consumer stays in the Kafka
-     * group (heartbeats continue) and K8s healthchecks remain healthy. Lag
-     * accumulates until the service recovers.
+     * Run the pipeline, handling CircuitOpenError with exponential backoff.
+     * When the circuit trips, holds the batch and periodically retries it.
+     * Between retries, calls consume(1) to reset the broker's
+     * max.poll.interval.ms timer, keeping the consumer in the group.
+     * Any messages consumed during backoff are appended to the held batch
+     * so they're not lost.
      */
     private async processWithCircuitBreaker(messages: Message[]): Promise<void> {
+        let backoffMs = this.config.circuitBreakerInitialBackoffMs
+        const maxBackoffMs = this.config.circuitBreakerMaxBackoffMs
+
         while (true) {
             try {
                 await runErrorTrackingPipeline(this.pipeline, messages)
@@ -268,44 +272,29 @@ export class ErrorTrackingConsumer {
                 }
 
                 batchProcessedCounter.inc({ status: 'circuit_open' })
-                logger.warn('⚠️', `${this.name} - circuit breaker open, pausing consumption`, {
+                logger.warn('⚠️', `${this.name} - circuit breaker open, backing off`, {
                     size: messages.length,
-                    cooldownMs: this.config.cymbalCircuitBreakerCooldownMs,
+                    backoffMs,
                 })
 
-                // Pause partitions so no new messages are fetched while we wait
-                this.kafkaConsumer.pause()
-                try {
-                    await this.waitForCooldown()
-                } finally {
-                    this.kafkaConsumer.resume()
-                }
+                // Keep the Kafka connection alive while waiting. Any pre-buffered
+                // messages are appended to the batch so they're processed when
+                // the dependency recovers.
+                const consumed = await this.kafkaConsumer.consume(1)
+                this.updateLagMetrics(consumed)
+                messages.push(...consumed)
 
-                logger.info('🔄', `${this.name} - cooldown elapsed, retrying batch`, {
+                await new Promise((resolve) => setTimeout(resolve, backoffMs))
+                backoffMs = Math.min(backoffMs * 2, maxBackoffMs)
+
+                logger.info('🔄', `${this.name} - retrying batch after backoff`, {
                     size: messages.length,
                 })
             }
         }
     }
 
-    /**
-     * Wait for the circuit breaker cooldown period while keeping the Kafka
-     * connection and K8s healthcheck alive.
-     */
-    private async waitForCooldown(): Promise<void> {
-        const endTime = Date.now() + this.config.cymbalCircuitBreakerCooldownMs
-        const pollIntervalMs = this.config.cymbalCircuitBreakerPollIntervalMs
-        while (Date.now() < endTime) {
-            await this.kafkaConsumer.poll()
-            const remaining = endTime - Date.now()
-            if (remaining > 0) {
-                await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, remaining)))
-            }
-        }
-    }
-
-    public async handleKafkaBatch(messages: Message[]): Promise<void> {
-        // Update offset timestamps for lag metrics
+    private updateLagMetrics(messages: Message[]): void {
         for (const message of messages) {
             if (message.timestamp) {
                 latestOffsetTimestampGauge
@@ -313,6 +302,10 @@ export class ErrorTrackingConsumer {
                     .set(message.timestamp)
             }
         }
+    }
+
+    public async handleKafkaBatch(messages: Message[]): Promise<void> {
+        this.updateLagMetrics(messages)
 
         try {
             await this.processWithCircuitBreaker(messages)
