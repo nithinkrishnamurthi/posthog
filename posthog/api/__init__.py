@@ -1,7 +1,15 @@
 from rest_framework import decorators, exceptions, viewsets
 from rest_framework_extensions.routers import NestedRegistryItem
 
-from posthog.api import data_color_theme, hog_flow, hog_flow_template, metalytics, my_notifications, project
+from posthog.api import (
+    data_color_theme,
+    hog_flow,
+    hog_flow_template,
+    linked_accounts,
+    metalytics,
+    my_notifications,
+    project,
+)
 from posthog.api.batch_imports import BatchImportViewSet
 from posthog.api.csp_reporting import CSPReportingViewSet
 from posthog.api.js_snippet import JsSnippetViewSet
@@ -82,7 +90,6 @@ from products.llm_analytics.backend.api import (
     ScoreDefinitionViewSet,
     TraceReviewViewSet,
 )
-from products.llm_analytics.backend.api.skills import LLMSkillViewSet
 from products.messaging.backend.api.message_categories import MessageCategoryViewSet
 from products.messaging.backend.api.message_preferences import MessagePreferencesViewSet
 from products.messaging.backend.api.message_templates import MessageTemplatesViewSet
@@ -342,13 +349,6 @@ environments_router.register(
     r"llm_prompts",
     LLMPromptViewSet,
     "environment_llm_prompts",
-    ["team_id"],
-)
-
-environments_router.register(
-    r"llm_skills",
-    LLMSkillViewSet,
-    "environment_llm_skills",
     ["team_id"],
 )
 
@@ -703,6 +703,7 @@ router.register(r"webauthn/login", webauthn.WebAuthnLoginViewSet, "webauthn_logi
 router.register(r"webauthn/credentials", webauthn.WebAuthnCredentialViewSet, "webauthn_credentials")
 router.register(r"reset", authentication.PasswordResetViewSet, "password_reset")
 router.register(r"users", user.UserViewSet, "users")
+router.register(r"users/@me/linked_accounts", linked_accounts.LinkedAccountsViewSet, "linked_accounts")
 router.register(
     r"user_home_settings",
     user_home_settings.UserHomeSettingsViewSet,
