@@ -1,6 +1,5 @@
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from functools import cached_property
 from zoneinfo import ZoneInfo
 
 from posthog.schema import CachedUsageMetricsQueryResponse, UsageMetric, UsageMetricsQuery, UsageMetricsQueryResponse
@@ -74,21 +73,13 @@ class UsageMetricsQueryRunner(AnalyticsQueryRunner[UsageMetricsQueryResponse]):
         )
 
     def to_query(self) -> ast.SelectQuery | ast.SelectSetQuery:
-<<<<<<< HEAD
-        metric_queries: list[ast.SelectQuery | ast.SelectSetQuery] = [
-            query for metric in self._usage_metrics if (query := self._get_metric_query(metric)) is not None
-        ]
-=======
-        """Returns a representative query for debugging/explain purposes."""
         metrics = self._get_usage_metrics()
         interval_groups = self._group_metrics_by_interval(metrics)
 
         if not interval_groups:
-            columns = ["day"]
             from posthog.hogql.database.models import UnknownDatabaseField
->>>>>>> 853c9b30a27 (fix(customer-analytics): optimize usage metrics query runner with interval grouping)
 
-            return ast.SelectQuery.empty(columns={key: UnknownDatabaseField(name=key) for key in columns})
+            return ast.SelectQuery.empty(columns={"day": UnknownDatabaseField(name="day")})
 
         queries = [self._build_interval_group_query(interval, group) for interval, group in interval_groups.items()]
 
@@ -96,8 +87,7 @@ class UsageMetricsQueryRunner(AnalyticsQueryRunner[UsageMetricsQueryResponse]):
             return queries[0]
         return ast.SelectSetQuery.create_from_queries(queries=queries, set_operator="UNION ALL")
 
-    @cached_property
-    def _usage_metrics(self) -> list[GroupUsageMetric]:
+    def _get_usage_metrics(self) -> list[GroupUsageMetric]:
         """
         Fetch all metrics for the team, regardless of group_type_index.
         The model conception was too coupled to groups, we'll need to make it group-agnostic to support person-level
@@ -116,6 +106,8 @@ class UsageMetricsQueryRunner(AnalyticsQueryRunner[UsageMetricsQueryResponse]):
     ) -> dict[int, list[tuple[GroupUsageMetric, ast.Expr]]]:
         groups: dict[int, list[tuple[GroupUsageMetric, ast.Expr]]] = defaultdict(list)
         for metric in metrics:
+            if metric.math == GroupUsageMetric.Math.SUM and not metric.math_property:
+                continue
             with self.timings.measure("get_metric_filter_expr"):
                 filter_expr = metric.get_expr()
             if filter_expr == ast.Constant(value=True):
@@ -123,23 +115,12 @@ class UsageMetricsQueryRunner(AnalyticsQueryRunner[UsageMetricsQueryResponse]):
             groups[metric.interval].append((metric, filter_expr))
         return dict(groups)
 
-<<<<<<< HEAD
-            where_expr = ast.And(exprs=[self._get_entity_filter(), *self._get_date_filter(metric=metric), filter_expr])
-            date_to = datetime.now(tz=ZoneInfo("UTC"))
-            date_from = date_to - timedelta(days=metric.interval)
-            prev_date_from = date_to - 2 * timedelta(days=metric.interval)
-            agg_exprs = self._build_aggregation_exprs(metric, date_from, date_to, prev_date_from)
-            if agg_exprs is None:
-                return None
-            value_expr, previous_expr = agg_exprs
-=======
     def _build_interval_group_query(
         self, interval: int, group: list[tuple[GroupUsageMetric, ast.Expr]]
     ) -> ast.SelectQuery:
         date_to = datetime.now(tz=ZoneInfo("UTC"))
         date_from = date_to - timedelta(days=interval)
         prev_date_from = date_to - 2 * timedelta(days=interval)
->>>>>>> 853c9b30a27 (fix(customer-analytics): optimize usage metrics query runner with interval grouping)
 
         current_condition = self._build_period_condition(date_from, date_to)
         previous_condition = self._build_period_condition(prev_date_from, date_from, upper_exclusive=True)
@@ -207,51 +188,14 @@ class UsageMetricsQueryRunner(AnalyticsQueryRunner[UsageMetricsQueryResponse]):
     def _build_conditional_aggregation(
         self,
         metric: GroupUsageMetric,
-<<<<<<< HEAD
-        date_from: datetime,
-        date_to: datetime,
-        prev_date_from: datetime,
-    ) -> tuple[ast.Expr, ast.Expr] | None:
-        current_condition = ast.And(
-            exprs=[
-                ast.CompareOperation(
-                    op=ast.CompareOperationOp.GtEq,
-                    left=ast.Field(chain=["timestamp"]),
-                    right=ast.Constant(value=date_from),
-                ),
-                ast.CompareOperation(
-                    op=ast.CompareOperationOp.LtEq,
-                    left=ast.Field(chain=["timestamp"]),
-                    right=ast.Constant(value=date_to),
-                ),
-            ]
-        )
-        previous_condition = ast.And(
-            exprs=[
-                ast.CompareOperation(
-                    op=ast.CompareOperationOp.GtEq,
-                    left=ast.Field(chain=["timestamp"]),
-                    right=ast.Constant(value=prev_date_from),
-                ),
-                ast.CompareOperation(
-                    op=ast.CompareOperationOp.Lt,
-                    left=ast.Field(chain=["timestamp"]),
-                    right=ast.Constant(value=date_from),
-                ),
-            ]
-        )
-=======
         filter_expr: ast.Expr,
         current_condition: ast.Expr,
         previous_condition: ast.Expr,
     ) -> tuple[ast.Expr, ast.Expr]:
         current_cond = ast.And(exprs=[filter_expr, current_condition])
         previous_cond = ast.And(exprs=[filter_expr, previous_condition])
->>>>>>> 853c9b30a27 (fix(customer-analytics): optimize usage metrics query runner with interval grouping)
 
         if metric.math == GroupUsageMetric.Math.SUM:
-            if not metric.math_property:
-                return None
             prop_as_float = ast.Call(name="toFloat", args=[ast.Field(chain=["properties", metric.math_property])])
             return (
                 ast.Call(
@@ -345,7 +289,7 @@ class UsageMetricsQueryRunner(AnalyticsQueryRunner[UsageMetricsQueryResponse]):
         """
         payload = super().get_cache_payload()
         metric_keys = sorted(
-            f"{metric.id}:{metric.math}:{metric.math_property or ''}" for metric in self._usage_metrics
+            f"{metric.id}:{metric.math}:{metric.math_property or ''}" for metric in self._get_usage_metrics()
         )
         payload["usage_metric_keys"] = metric_keys
         return payload
