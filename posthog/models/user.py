@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Optional, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models, transaction
@@ -84,6 +84,8 @@ class UserManager(BaseUserManager):
     def get_queryset(self):
         return super().get_queryset().defer(*DEFERED_ATTRS)
 
+    model: type["User"]
+
     use_in_migrations = True
 
     def create_user(self, email: str, password: Optional[str], first_name: str, **extra_fields) -> "User":
@@ -92,7 +94,7 @@ class UserManager(BaseUserManager):
             raise ValueError("Email must be provided!")
         email = EmailNormalizer.normalize(email)
         extra_fields.setdefault("distinct_id", generate_random_token())
-        user = cast("User", self.model(email=email, first_name=first_name, **extra_fields))
+        user = self.model(email=email, first_name=first_name, **extra_fields)
         if password is not None:
             # nosemgrep: python.django.security.audit.unvalidated-password.unvalidated-password (validation happens at serializer/view layer before reaching this method)
             user.set_password(password)
@@ -163,9 +165,9 @@ class ShortcutPosition(models.TextChoices):
     HIDDEN = "hidden", "Hidden"
 
 
-class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore[django-manager-missing]
+class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = []
+    REQUIRED_FIELDS: list[str] = []
 
     DISABLED = "disabled"
     TOOLBAR = "toolbar"
@@ -221,9 +223,9 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
     temporary_token = deprecate_field(models.CharField(max_length=200, null=True, blank=True, unique=True))
 
     # Remove unused attributes from `AbstractUser`
-    username = cast(Any, None)
+    username = None
 
-    objects: UserManager = UserManager()  # type: ignore[assignment,misc]
+    objects: UserManager = UserManager()
 
     # Reverse relation from social_django.UserSocialAuth.user (related_name="social_auth"); not a DB column.
     if TYPE_CHECKING:
@@ -240,7 +242,7 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
         return instance
 
     @property
-    def is_superuser(self) -> bool:  # type: ignore[override]
+    def is_superuser(self) -> bool:
         return self.is_staff
 
     @cached_property
@@ -308,7 +310,7 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
                     accessible_team_ids = accessible_private_team_ids | role_accessible_team_ids
 
                     # Build the list of all accessible team IDs
-                    all_accessible_team_ids: set[int] = set()
+                    all_accessible_team_ids = set()
 
                     # Add teams from organizations where user is admin
                     admin_teams = Team.objects.filter(
@@ -353,15 +355,34 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
     def get_github_login(self) -> str | None:
         """Resolve this user's GitHub login.
 
-        Checks GitHub App integrations created by this user first (populated during
-        GitHub App installation with user authorization), then falls back to social auth.
-
-        When called from a context with prefetched data (e.g. ``_prefetched_github_integrations``
-        or ``social_auth``), the prefetch cache is used. Otherwise, queries are issued.
+        Precedence:
+        1. ``UserSocialIdentity`` — the explicit identity-mapping record.
+        2. ``UserSocialAuth`` — backward compat for pre-feature rows that haven't
+           been backfilled with an identity yet.
+        3. GitHub App integration ``connecting_user_github_login`` — implicit
+           identity captured at App install time, before the identity model existed.
         """
         from posthog.models.integration import Integration
+        from posthog.models.user_social_identity import UserSocialIdentity
 
-        # Check GitHub integrations created by this user
+        identity = UserSocialIdentity.objects.filter(user=self, provider="github").first()
+        if identity and isinstance(identity.extra_data, dict):
+            login = identity.extra_data.get("login")
+            if login:
+                return str(login)
+
+        for sa in self.social_auth.all():
+            if sa.provider != "github":
+                continue
+            login_val = getattr(sa, "_prefetched_github_login", None)
+            if login_val:
+                return str(login_val)
+            if isinstance(sa.extra_data, dict):
+                login = sa.extra_data.get("login")
+                if login:
+                    return str(login)
+
+        # Fall back to GitHub App integration identity captured at install time.
         prefetched_integrations = getattr(self, "_prefetched_github_integrations", None)
         if prefetched_integrations is not None:
             for integration in prefetched_integrations:
@@ -378,17 +399,6 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
             if login:
                 return str(login)
 
-        # Fall back to social auth
-        for sa in self.social_auth.all():
-            if sa.provider != "github":
-                continue
-            login_val = getattr(sa, "_prefetched_github_login", None)
-            if login_val:
-                return str(login_val)
-            if isinstance(sa.extra_data, dict):
-                login = sa.extra_data.get("login")
-                if login:
-                    return str(login)
         return None
 
     def join(
@@ -434,6 +444,7 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
                     },
                 )
 
+        self.update_billing_organization_users(organization)
         return membership
 
     @property
@@ -461,6 +472,7 @@ class User(AbstractUser, UUIDTClassicModel, ModelActivityMixin):  # type: ignore
                 )
                 self.team = self.current_team  # Update cached property
                 self.save()
+        self.update_billing_organization_users(organization)
 
     def update_billing_organization_users(self, organization: Organization) -> None:
         from ee.billing.billing_manager import BillingManager  # avoid circular import
