@@ -155,8 +155,9 @@ class FeatureFlagStatusChecker:
         return rollout_percentage == 100 and len(properties) == 0
 
     def is_boolean_flag_fully_rolled_out(self, flag: FeatureFlag) -> bool:
-        # An active flag with no release conditions is still considered fully rolled out.
-        # This isn't a supported state, but in place to support legacy data.
+        # Treat missing filters, `{}`, and `{"groups": []}` as "no release conditions"
+        # and therefore fully rolled out. Not a supported state, but legacy data hits
+        # all three shapes (especially `{"groups": []}` post-backfill).
         release_conditions = (flag.filters or {}).get("groups", [])
         if not release_conditions:
             logger.debug(f"Boolean flag {flag.id} has no release conditions, so it is rolled out to 100%")
