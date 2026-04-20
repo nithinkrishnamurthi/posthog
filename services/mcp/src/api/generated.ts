@@ -22995,6 +22995,11 @@ export namespace Schemas {
        * @nullable
        */
       readonly finished_at: string | null;
+      /**
+       * AI-generated summary included in this delivery, when one was produced.
+       * @nullable
+       */
+      readonly change_summary: string | null;
     }
 
     export interface PaginatedSubscriptionDeliveryList {
