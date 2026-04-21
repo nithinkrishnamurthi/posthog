@@ -1238,37 +1238,30 @@ jobs:
               continue-on-error: true
 
             - name: Restore migrated schema into test database
-              if: ${{ steps.download-schema.outcome == 'success' && steps.download-schema.outputs.found_artifact == 'true' }}
+              if: ${{ steps.download-schema.outcome == 'success' && hashFiles('/tmp/master-schema/schema.sql.gz') != '' }}
               shell: bash
               env:
                   PGPASSWORD: posthog
               run: |
                   # Pre-create the Django test DB with master's migrated schema.
                   # Django's --reuse-db will skip migrations since django_migrations table is populated.
-                  if [ ! -f /tmp/master-schema/schema.sql.gz ]; then
-                      echo "::warning::schema.sql.gz not found — skipping restore (Django will run migrations)"
-                      exit 0
-                  fi
-                  ls -la /tmp/master-schema/
-                  echo "Schema size: $(du -h /tmp/master-schema/schema.sql.gz | cut -f1)"
-                  # Connect directly via localhost (DATABASE_URL env var is set at workflow level)
-                  DB_HOST=localhost
-                  DB_PORT=5432
+                  set -e
+                  DB_HOST="${DATABASE_URL##*@}"
+                  DB_HOST="${DB_HOST%%:*}"
+                  DB_PORT="${DATABASE_URL##*:}"
+                  DB_PORT="${DB_PORT%%/*}"
+                  echo "Restoring schema into test_posthog at ${DB_HOST}:${DB_PORT}"
                   # Drop any existing test_posthog (safety) and recreate
                   psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d postgres \
                     -c "DROP DATABASE IF EXISTS test_posthog;" \
                     -c "CREATE DATABASE test_posthog OWNER posthog;"
-                  # Load schema
+                  # Load schema (schema dump uses --clean which references db name — restore to test_posthog directly)
                   gunzip -c /tmp/master-schema/schema.sql.gz | \
                     psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d test_posthog \
-                    --set ON_ERROR_STOP=0 > /tmp/restore.log 2>&1 || echo "::warning::psql restore had errors (may be benign)"
+                    --set ON_ERROR_STOP=0 > /tmp/restore.log 2>&1 || true
                   # Verify django_migrations populated
                   MIGRATION_COUNT=$(psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d test_posthog -tAc "SELECT count(*) FROM django_migrations;" 2>/dev/null || echo "0")
                   echo "::notice::Pre-restored schema with $MIGRATION_COUNT migrations — Django --reuse-db will skip migrations"
-                  if [ "$MIGRATION_COUNT" = "0" ]; then
-                      echo "::warning::No migrations in restored schema — restore may have failed"
-                      tail -20 /tmp/restore.log || true
-                  fi
 
             - name: Determine if --snapshot-update should be on
               # UPDATE mode: human commits - update snapshots
