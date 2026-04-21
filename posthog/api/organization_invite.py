@@ -242,6 +242,14 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         guest_resources = attrs.get("guest_resources") or []
+        bypass_sso = attrs.get("bypass_sso") or False
+
+        # SSO bypass is a guest-scenario carve-out; attaching it to a regular invite would give the
+        # new member an SSO-enforcement exception without the admin expecting it. Enforce the
+        # coupling to match the UI.
+        if bypass_sso and not guest_resources:
+            raise exceptions.ValidationError({"bypass_sso": "SSO bypass is only available on guest invites."})
+
         if not guest_resources:
             return attrs
 

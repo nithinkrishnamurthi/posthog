@@ -241,8 +241,11 @@ def promote_to_member(membership: OrganizationMembership, by: User) -> int:
     for grant in grants:
         delete_grant(grant)
 
+    # Reset SSO bypass on promotion — the carve-out was granted for a guest scenario;
+    # elevating to full member should require re-granting if the admin still wants it.
     membership.is_guest = False
-    membership.save(update_fields=["is_guest", "updated_at"])
+    membership.bypass_sso = False
+    membership.save(update_fields=["is_guest", "bypass_sso", "updated_at"])
 
     log_activity(
         organization_id=membership.organization_id,

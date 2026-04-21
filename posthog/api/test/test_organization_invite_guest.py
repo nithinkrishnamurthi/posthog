@@ -128,3 +128,42 @@ class TestOrganizationInviteGuest(APIBaseTest):
         membership = OrganizationMembership.objects.get(organization=self.organization, user=invitee)
         self.assertFalse(membership.is_guest)
         self.assertFalse(GuestResourceGrant.objects.filter(organization_membership=membership).exists())
+
+    def test_accepting_invite_with_bypass_sso_sets_membership_flag(self) -> None:
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(bypass_sso=True),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        invite = OrganizationInvite.objects.get(id=res.json()["id"])
+        invitee = User.objects.create_user(email="newguest@example.com", first_name="G", password="password123")
+        invite.use(invitee)
+
+        membership = OrganizationMembership.objects.get(organization=self.organization, user=invitee)
+        self.assertTrue(membership.is_guest)
+        self.assertTrue(membership.bypass_sso)
+
+    def test_accepting_invite_without_bypass_sso_leaves_membership_flag_false(self) -> None:
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        invite = OrganizationInvite.objects.get(id=res.json()["id"])
+        invitee = User.objects.create_user(email="newguest@example.com", first_name="G", password="password123")
+        invite.use(invitee)
+
+        membership = OrganizationMembership.objects.get(organization=self.organization, user=invitee)
+        self.assertTrue(membership.is_guest)
+        self.assertFalse(membership.bypass_sso)
+
+    def test_bypass_sso_without_guest_resources_is_rejected(self) -> None:
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            {"target_email": "regular@example.com", "send_email": False, "bypass_sso": True},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("bypass_sso", res.json()["attr"] or res.json().get("detail", ""))

@@ -67,3 +67,14 @@ class TestPromoteGuest(APIBaseTest):
                 item_id=str(self.guest_membership.id),
             ).exists()
         )
+
+    def test_promote_resets_bypass_sso(self) -> None:
+        self.guest_membership.bypass_sso = True
+        self.guest_membership.save(update_fields=["bypass_sso"])
+
+        res = self.client.post(self._promote_url(self.guest_membership))
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.content)
+
+        self.guest_membership.refresh_from_db()
+        self.assertFalse(self.guest_membership.is_guest)
+        self.assertFalse(self.guest_membership.bypass_sso)
