@@ -705,6 +705,13 @@ class ExternalDataSourceCreateSerializer(serializers.Serializer):
 
 
 class DatabaseSchemaRequestSerializer(serializers.Serializer):
+    """Validate credentials and preview available tables from a remote database.
+
+    The request body contains source_type plus flat source-specific credential fields
+    (e.g. host, port, database, user, password, schema for Postgres). The credential
+    fields vary per source_type and are validated dynamically by the source registry.
+    """
+
     source_type = serializers.ChoiceField(
         choices=ExternalDataSourceType.choices,
         help_text="The source type to validate against.",
@@ -1412,9 +1419,6 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             data={"added": len(schemas_created), "deleted": len(schemas_deleted)},
         )
 
-    # OpenAPI annotation only — the body also contains source-specific credential
-    # fields that vary per source_type, so the serializer cannot declare them all.
-    # The action reads the full request.data for validate_config/parse_config.
     @extend_schema(request=DatabaseSchemaRequestSerializer)
     @action(methods=["POST"], detail=False)
     def database_schema(self, request: Request, *arg: Any, **kwargs: Any):
