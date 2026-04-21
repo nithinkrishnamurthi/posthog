@@ -100,16 +100,20 @@ export function ViewModeActions(): JSX.Element {
 
     return (
         <>
-            <LemonButton
-                type="secondary"
-                data-attr="dashboard-share-button"
-                onClick={() => push(urls.dashboardSharing(dashboard.id))}
-                size="small"
-                icon={<IconShare fontSize="16" />}
-                disabledReason={tiles.length === 0 ? 'Add at least one tile before sharing this dashboard' : undefined}
-            >
-                Share
-            </LemonButton>
+            {canEditDashboard && (
+                <LemonButton
+                    type="secondary"
+                    data-attr="dashboard-share-button"
+                    onClick={() => push(urls.dashboardSharing(dashboard.id))}
+                    size="small"
+                    icon={<IconShare fontSize="16" />}
+                    disabledReason={
+                        tiles.length === 0 ? 'Add at least one tile before sharing this dashboard' : undefined
+                    }
+                >
+                    Share
+                </LemonButton>
+            )}
             {canEditDashboard && (
                 <AppShortcut
                     name="EnterEditMode"
