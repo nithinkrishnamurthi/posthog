@@ -154,16 +154,6 @@ export interface WarehouseStatusResponseApi {
     failed_at: string | null
 }
 
-export type SyncTypeEnumApi = (typeof SyncTypeEnumApi)[keyof typeof SyncTypeEnumApi]
-
-export const SyncTypeEnumApi = {
-    FullRefresh: 'full_refresh',
-    Incremental: 'incremental',
-    Append: 'append',
-    Webhook: 'webhook',
-    Cdc: 'cdc',
-} as const
-
 /**
  * * `consolidated` - consolidated
  * `cdc_only` - cdc_only
@@ -176,6 +166,10 @@ export const CdcTableModeEnumApi = {
     CdcOnly: 'cdc_only',
     Both: 'both',
 } as const
+
+export type NullEnumApi = (typeof NullEnumApi)[keyof typeof NullEnumApi]
+
+export const NullEnumApi = {} as const
 
 /**
  * @nullable
@@ -200,20 +194,44 @@ export interface ExternalDataSchemaApi {
     readonly incremental: boolean
     /** @nullable */
     readonly status: string | null
-    readonly sync_type: SyncTypeEnumApi | null
-    /** @nullable */
-    readonly incremental_field: string | null
-    /** @nullable */
-    readonly incremental_field_type: string | null
-    /** @nullable */
-    readonly sync_frequency: string | null
-    /** @nullable */
-    readonly sync_time_of_day: string | null
+    /**
+     * Sync strategy: incremental, full_refresh, append, or cdc.
+     * @nullable
+     */
+    sync_type?: string | null
+    /**
+     * Column name used to track sync progress.
+     * @nullable
+     */
+    incremental_field?: string | null
+    /**
+     * Data type of the incremental field.
+     * @nullable
+     */
+    incremental_field_type?: string | null
+    /**
+     * How often to sync: 30min, 1hour, 6hour, 12hour, or 24hour.
+     * @nullable
+     */
+    sync_frequency?: string | null
+    /**
+     * UTC time of day to run the sync (HH:MM:SS).
+     * @nullable
+     */
+    sync_time_of_day?: string | null
     /** @nullable */
     readonly description: string | null
-    /** @nullable */
-    readonly primary_key_columns: readonly string[] | null
-    readonly cdc_table_mode: CdcTableModeEnumApi
+    /**
+     * Column names for primary key deduplication.
+     * @nullable
+     */
+    primary_key_columns?: string[] | null
+    /** For CDC syncs: consolidated, cdc_only, or both.
+
+* `consolidated` - consolidated
+* `cdc_only` - cdc_only
+* `both` - both */
+    cdc_table_mode?: CdcTableModeEnumApi | NullEnumApi | null
 }
 
 export interface PaginatedExternalDataSchemaListApi {
@@ -248,20 +266,44 @@ export interface PatchedExternalDataSchemaApi {
     readonly incremental?: boolean
     /** @nullable */
     readonly status?: string | null
-    readonly sync_type?: SyncTypeEnumApi | null
-    /** @nullable */
-    readonly incremental_field?: string | null
-    /** @nullable */
-    readonly incremental_field_type?: string | null
-    /** @nullable */
-    readonly sync_frequency?: string | null
-    /** @nullable */
-    readonly sync_time_of_day?: string | null
+    /**
+     * Sync strategy: incremental, full_refresh, append, or cdc.
+     * @nullable
+     */
+    sync_type?: string | null
+    /**
+     * Column name used to track sync progress.
+     * @nullable
+     */
+    incremental_field?: string | null
+    /**
+     * Data type of the incremental field.
+     * @nullable
+     */
+    incremental_field_type?: string | null
+    /**
+     * How often to sync: 30min, 1hour, 6hour, 12hour, or 24hour.
+     * @nullable
+     */
+    sync_frequency?: string | null
+    /**
+     * UTC time of day to run the sync (HH:MM:SS).
+     * @nullable
+     */
+    sync_time_of_day?: string | null
     /** @nullable */
     readonly description?: string | null
-    /** @nullable */
-    readonly primary_key_columns?: readonly string[] | null
-    readonly cdc_table_mode?: CdcTableModeEnumApi
+    /**
+     * Column names for primary key deduplication.
+     * @nullable
+     */
+    primary_key_columns?: string[] | null
+    /** For CDC syncs: consolidated, cdc_only, or both.
+
+* `consolidated` - consolidated
+* `cdc_only` - cdc_only
+* `both` - both */
+    cdc_table_mode?: CdcTableModeEnumApi | NullEnumApi | null
 }
 
 /**
@@ -577,10 +619,6 @@ export const EngineEnumApi = {
     Postgres: 'postgres',
 } as const
 
-export type NullEnumApi = (typeof NullEnumApi)[keyof typeof NullEnumApi]
-
-export const NullEnumApi = {} as const
-
 export interface ExternalDataSourceRevenueAnalyticsConfigApi {
     enabled?: boolean
     include_invoiceless_charges?: boolean
@@ -640,6 +678,176 @@ export interface PaginatedExternalDataSourceSerializersListApi {
     results: ExternalDataSourceSerializersApi[]
 }
 
+/**
+ * Connection credentials and a 'schemas' array. Keys depend on source_type.
+ */
+export type ExternalDataSourceCreateApiPayload = { [key: string]: unknown }
+
+export interface ExternalDataSourceCreateApi {
+    /** The source type (e.g. 'Postgres', 'Stripe').
+
+* `Ashby` - Ashby
+* `Supabase` - Supabase
+* `CustomerIO` - CustomerIO
+* `Github` - Github
+* `Stripe` - Stripe
+* `Hubspot` - Hubspot
+* `Postgres` - Postgres
+* `Zendesk` - Zendesk
+* `Snowflake` - Snowflake
+* `Salesforce` - Salesforce
+* `MySQL` - MySQL
+* `MongoDB` - MongoDB
+* `MSSQL` - MSSQL
+* `Vitally` - Vitally
+* `BigQuery` - BigQuery
+* `Chargebee` - Chargebee
+* `Clerk` - Clerk
+* `GoogleAds` - GoogleAds
+* `TemporalIO` - TemporalIO
+* `DoIt` - DoIt
+* `GoogleSheets` - GoogleSheets
+* `MetaAds` - MetaAds
+* `Klaviyo` - Klaviyo
+* `Mailchimp` - Mailchimp
+* `Braze` - Braze
+* `Mailjet` - Mailjet
+* `Redshift` - Redshift
+* `Polar` - Polar
+* `RevenueCat` - RevenueCat
+* `LinkedinAds` - LinkedinAds
+* `RedditAds` - RedditAds
+* `TikTokAds` - TikTokAds
+* `BingAds` - BingAds
+* `Shopify` - Shopify
+* `Attio` - Attio
+* `SnapchatAds` - SnapchatAds
+* `Linear` - Linear
+* `Intercom` - Intercom
+* `Amplitude` - Amplitude
+* `Mixpanel` - Mixpanel
+* `Jira` - Jira
+* `ActiveCampaign` - ActiveCampaign
+* `Marketo` - Marketo
+* `Adjust` - Adjust
+* `AppsFlyer` - AppsFlyer
+* `Freshdesk` - Freshdesk
+* `GoogleAnalytics` - GoogleAnalytics
+* `Pipedrive` - Pipedrive
+* `SendGrid` - SendGrid
+* `Slack` - Slack
+* `PagerDuty` - PagerDuty
+* `Asana` - Asana
+* `Notion` - Notion
+* `Airtable` - Airtable
+* `Greenhouse` - Greenhouse
+* `BambooHR` - BambooHR
+* `Lever` - Lever
+* `GitLab` - GitLab
+* `Datadog` - Datadog
+* `Sentry` - Sentry
+* `Pendo` - Pendo
+* `FullStory` - FullStory
+* `AmazonAds` - AmazonAds
+* `PinterestAds` - PinterestAds
+* `AppleSearchAds` - AppleSearchAds
+* `QuickBooks` - QuickBooks
+* `Xero` - Xero
+* `NetSuite` - NetSuite
+* `WooCommerce` - WooCommerce
+* `BigCommerce` - BigCommerce
+* `PayPal` - PayPal
+* `Square` - Square
+* `Zoom` - Zoom
+* `Trello` - Trello
+* `Monday` - Monday
+* `ClickUp` - ClickUp
+* `Confluence` - Confluence
+* `Recurly` - Recurly
+* `SalesLoft` - SalesLoft
+* `Outreach` - Outreach
+* `Gong` - Gong
+* `Calendly` - Calendly
+* `Typeform` - Typeform
+* `Iterable` - Iterable
+* `ZohoCRM` - ZohoCRM
+* `Close` - Close
+* `Oracle` - Oracle
+* `DynamoDB` - DynamoDB
+* `Elasticsearch` - Elasticsearch
+* `Kafka` - Kafka
+* `LaunchDarkly` - LaunchDarkly
+* `Braintree` - Braintree
+* `Recharge` - Recharge
+* `HelpScout` - HelpScout
+* `Gorgias` - Gorgias
+* `Instagram` - Instagram
+* `YouTubeAnalytics` - YouTubeAnalytics
+* `FacebookPages` - FacebookPages
+* `TwitterAds` - TwitterAds
+* `Workday` - Workday
+* `ServiceNow` - ServiceNow
+* `Pardot` - Pardot
+* `Copper` - Copper
+* `Front` - Front
+* `ChartMogul` - ChartMogul
+* `Zuora` - Zuora
+* `Paddle` - Paddle
+* `CircleCI` - CircleCI
+* `CockroachDB` - CockroachDB
+* `Firebase` - Firebase
+* `AzureBlob` - AzureBlob
+* `GoogleDrive` - GoogleDrive
+* `OneDrive` - OneDrive
+* `SharePoint` - SharePoint
+* `Box` - Box
+* `SFTP` - SFTP
+* `MicrosoftTeams` - MicrosoftTeams
+* `Aircall` - Aircall
+* `Webflow` - Webflow
+* `Okta` - Okta
+* `Auth0` - Auth0
+* `Productboard` - Productboard
+* `Smartsheet` - Smartsheet
+* `Wrike` - Wrike
+* `Plaid` - Plaid
+* `SurveyMonkey` - SurveyMonkey
+* `Eventbrite` - Eventbrite
+* `RingCentral` - RingCentral
+* `Twilio` - Twilio
+* `Freshsales` - Freshsales
+* `Shortcut` - Shortcut
+* `ConvertKit` - ConvertKit
+* `Drip` - Drip
+* `CampaignMonitor` - CampaignMonitor
+* `MailerLite` - MailerLite
+* `Omnisend` - Omnisend
+* `Brevo` - Brevo
+* `Postmark` - Postmark
+* `Granola` - Granola
+* `BuildBetter` - BuildBetter
+* `Convex` - Convex
+* `ClickHouse` - ClickHouse */
+    source_type: SourceTypeF0aEnumApi
+    /** Connection credentials and a 'schemas' array. Keys depend on source_type. */
+    payload: ExternalDataSourceCreateApiPayload
+    /**
+     * Table name prefix in HogQL.
+     * @nullable
+     */
+    prefix?: string | null
+    /**
+     * Human-readable description.
+     * @nullable
+     */
+    description?: string | null
+    /** Connection mode: 'warehouse' (import) or 'direct' (live query).
+
+* `warehouse` - warehouse
+* `direct` - direct */
+    access_method?: AccessMethodEnumApi
+}
+
 export type PatchedExternalDataSourceSerializersApiSchemasItem = { [key: string]: unknown }
 
 /**
@@ -684,6 +892,23 @@ export interface PatchedExternalDataSourceSerializersApi {
     readonly user_access_level?: string | null
     readonly supports_webhooks?: boolean
 }
+
+/**
+ * * `full_refresh` - full_refresh
+ * `incremental` - incremental
+ * `append` - append
+ * `webhook` - webhook
+ * `cdc` - cdc
+ */
+export type SyncTypeEnumApi = (typeof SyncTypeEnumApi)[keyof typeof SyncTypeEnumApi]
+
+export const SyncTypeEnumApi = {
+    FullRefresh: 'full_refresh',
+    Incremental: 'incremental',
+    Append: 'append',
+    Webhook: 'webhook',
+    Cdc: 'cdc',
+} as const
 
 export interface ExternalDataSourceBulkUpdateSchemaApi {
     /** Schema identifier to update. */
@@ -731,6 +956,35 @@ export interface PatchedExternalDataSourceBulkUpdateSchemasApi {
     schemas?: ExternalDataSourceBulkUpdateSchemaApi[]
 }
 
+export interface ExternalDataJobSerializersApi {
+    readonly id: string
+    readonly created_at: string
+    /** @nullable */
+    readonly created_by: number | null
+    /** @nullable */
+    readonly finished_at: string | null
+    readonly status: string
+    readonly schema: string
+    /** @nullable */
+    readonly rows_synced: number | null
+    /**
+     * The latest error that occurred during this run.
+     * @nullable
+     */
+    readonly latest_error: string | null
+    /** @nullable */
+    readonly workflow_run_id: string | null
+}
+
+export interface PaginatedExternalDataJobSerializersListApi {
+    count: number
+    /** @nullable */
+    next?: string | null
+    /** @nullable */
+    previous?: string | null
+    results: ExternalDataJobSerializersApi[]
+}
+
 export interface ExternalDataSourceConnectionOptionApi {
     readonly id: string
     /** @nullable */
@@ -749,6 +1003,154 @@ export interface PaginatedExternalDataSourceConnectionOptionListApi {
     /** @nullable */
     previous?: string | null
     results: ExternalDataSourceConnectionOptionApi[]
+}
+
+export interface DatabaseSchemaRequestApi {
+    /** The source type to validate against.
+
+* `Ashby` - Ashby
+* `Supabase` - Supabase
+* `CustomerIO` - CustomerIO
+* `Github` - Github
+* `Stripe` - Stripe
+* `Hubspot` - Hubspot
+* `Postgres` - Postgres
+* `Zendesk` - Zendesk
+* `Snowflake` - Snowflake
+* `Salesforce` - Salesforce
+* `MySQL` - MySQL
+* `MongoDB` - MongoDB
+* `MSSQL` - MSSQL
+* `Vitally` - Vitally
+* `BigQuery` - BigQuery
+* `Chargebee` - Chargebee
+* `Clerk` - Clerk
+* `GoogleAds` - GoogleAds
+* `TemporalIO` - TemporalIO
+* `DoIt` - DoIt
+* `GoogleSheets` - GoogleSheets
+* `MetaAds` - MetaAds
+* `Klaviyo` - Klaviyo
+* `Mailchimp` - Mailchimp
+* `Braze` - Braze
+* `Mailjet` - Mailjet
+* `Redshift` - Redshift
+* `Polar` - Polar
+* `RevenueCat` - RevenueCat
+* `LinkedinAds` - LinkedinAds
+* `RedditAds` - RedditAds
+* `TikTokAds` - TikTokAds
+* `BingAds` - BingAds
+* `Shopify` - Shopify
+* `Attio` - Attio
+* `SnapchatAds` - SnapchatAds
+* `Linear` - Linear
+* `Intercom` - Intercom
+* `Amplitude` - Amplitude
+* `Mixpanel` - Mixpanel
+* `Jira` - Jira
+* `ActiveCampaign` - ActiveCampaign
+* `Marketo` - Marketo
+* `Adjust` - Adjust
+* `AppsFlyer` - AppsFlyer
+* `Freshdesk` - Freshdesk
+* `GoogleAnalytics` - GoogleAnalytics
+* `Pipedrive` - Pipedrive
+* `SendGrid` - SendGrid
+* `Slack` - Slack
+* `PagerDuty` - PagerDuty
+* `Asana` - Asana
+* `Notion` - Notion
+* `Airtable` - Airtable
+* `Greenhouse` - Greenhouse
+* `BambooHR` - BambooHR
+* `Lever` - Lever
+* `GitLab` - GitLab
+* `Datadog` - Datadog
+* `Sentry` - Sentry
+* `Pendo` - Pendo
+* `FullStory` - FullStory
+* `AmazonAds` - AmazonAds
+* `PinterestAds` - PinterestAds
+* `AppleSearchAds` - AppleSearchAds
+* `QuickBooks` - QuickBooks
+* `Xero` - Xero
+* `NetSuite` - NetSuite
+* `WooCommerce` - WooCommerce
+* `BigCommerce` - BigCommerce
+* `PayPal` - PayPal
+* `Square` - Square
+* `Zoom` - Zoom
+* `Trello` - Trello
+* `Monday` - Monday
+* `ClickUp` - ClickUp
+* `Confluence` - Confluence
+* `Recurly` - Recurly
+* `SalesLoft` - SalesLoft
+* `Outreach` - Outreach
+* `Gong` - Gong
+* `Calendly` - Calendly
+* `Typeform` - Typeform
+* `Iterable` - Iterable
+* `ZohoCRM` - ZohoCRM
+* `Close` - Close
+* `Oracle` - Oracle
+* `DynamoDB` - DynamoDB
+* `Elasticsearch` - Elasticsearch
+* `Kafka` - Kafka
+* `LaunchDarkly` - LaunchDarkly
+* `Braintree` - Braintree
+* `Recharge` - Recharge
+* `HelpScout` - HelpScout
+* `Gorgias` - Gorgias
+* `Instagram` - Instagram
+* `YouTubeAnalytics` - YouTubeAnalytics
+* `FacebookPages` - FacebookPages
+* `TwitterAds` - TwitterAds
+* `Workday` - Workday
+* `ServiceNow` - ServiceNow
+* `Pardot` - Pardot
+* `Copper` - Copper
+* `Front` - Front
+* `ChartMogul` - ChartMogul
+* `Zuora` - Zuora
+* `Paddle` - Paddle
+* `CircleCI` - CircleCI
+* `CockroachDB` - CockroachDB
+* `Firebase` - Firebase
+* `AzureBlob` - AzureBlob
+* `GoogleDrive` - GoogleDrive
+* `OneDrive` - OneDrive
+* `SharePoint` - SharePoint
+* `Box` - Box
+* `SFTP` - SFTP
+* `MicrosoftTeams` - MicrosoftTeams
+* `Aircall` - Aircall
+* `Webflow` - Webflow
+* `Okta` - Okta
+* `Auth0` - Auth0
+* `Productboard` - Productboard
+* `Smartsheet` - Smartsheet
+* `Wrike` - Wrike
+* `Plaid` - Plaid
+* `SurveyMonkey` - SurveyMonkey
+* `Eventbrite` - Eventbrite
+* `RingCentral` - RingCentral
+* `Twilio` - Twilio
+* `Freshsales` - Freshsales
+* `Shortcut` - Shortcut
+* `ConvertKit` - ConvertKit
+* `Drip` - Drip
+* `CampaignMonitor` - CampaignMonitor
+* `MailerLite` - MailerLite
+* `Omnisend` - Omnisend
+* `Brevo` - Brevo
+* `Postmark` - Postmark
+* `Granola` - Granola
+* `BuildBetter` - BuildBetter
+* `Convex` - Convex
+* `ClickHouse` - ClickHouse */
+    source_type: SourceTypeF0aEnumApi
 }
 
 export interface QueryTabStateApi {
@@ -1319,6 +1721,33 @@ export type ExternalDataSourcesBulkUpdateSchemasPartialUpdateParams = {
      * The initial index from which to return the results.
      */
     offset?: number
+    /**
+     * A search term.
+     */
+    search?: string
+}
+
+export type ExternalDataSourcesJobsListParams = {
+    /**
+     * ISO timestamp — only return jobs created after this date.
+     */
+    after?: string
+    /**
+     * ISO timestamp — only return jobs created before this date.
+     */
+    before?: string
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number
+    /**
+     * Filter jobs by table schema names.
+     */
+    schemas?: string[]
     /**
      * A search term.
      */

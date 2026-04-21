@@ -16,18 +16,22 @@ import type {
     DataWarehouseSavedQueryApi,
     DataWarehouseSavedQueryDraftApi,
     DataWarehouseSavedQueryFolderApi,
+    DatabaseSchemaRequestApi,
     DeprovisionWarehouseResponseApi,
     ExternalDataSchemaApi,
     ExternalDataSchemasListParams,
+    ExternalDataSourceCreateApi,
     ExternalDataSourceSerializersApi,
     ExternalDataSourcesBulkUpdateSchemasPartialUpdateParams,
     ExternalDataSourcesCheckCdcPrerequisitesCreate200,
     ExternalDataSourcesConnectionsListParams,
+    ExternalDataSourcesJobsListParams,
     ExternalDataSourcesListParams,
     PaginatedDataModelingJobListApi,
     PaginatedDataWarehouseModelPathListApi,
     PaginatedDataWarehouseSavedQueryDraftListApi,
     PaginatedDataWarehouseSavedQueryMinimalListApi,
+    PaginatedExternalDataJobSerializersListApi,
     PaginatedExternalDataSchemaListApi,
     PaginatedExternalDataSourceConnectionOptionListApi,
     PaginatedExternalDataSourceSerializersListApi,
@@ -796,14 +800,14 @@ export const getExternalDataSourcesCreateUrl = (projectId: string) => {
 
 export const externalDataSourcesCreate = async (
     projectId: string,
-    externalDataSourceSerializersApi: NonReadonly<ExternalDataSourceSerializersApi>,
+    externalDataSourceCreateApi: ExternalDataSourceCreateApi,
     options?: RequestInit
-): Promise<ExternalDataSourceSerializersApi> => {
-    return apiMutator<ExternalDataSourceSerializersApi>(getExternalDataSourcesCreateUrl(projectId), {
+): Promise<ExternalDataSourceCreateApi> => {
+    return apiMutator<ExternalDataSourceCreateApi>(getExternalDataSourcesCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(externalDataSourceSerializersApi),
+        body: JSON.stringify(externalDataSourceCreateApi),
     })
 }
 
@@ -971,19 +975,39 @@ export const externalDataSourcesDeleteWebhookCreate = async (
 /**
  * Create, Read, Update and Delete External data Sources.
  */
-export const getExternalDataSourcesJobsRetrieveUrl = (projectId: string, id: string) => {
-    return `/api/projects/${projectId}/external_data_sources/${id}/jobs/`
-}
-
-export const externalDataSourcesJobsRetrieve = async (
+export const getExternalDataSourcesJobsListUrl = (
     projectId: string,
     id: string,
-    options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getExternalDataSourcesJobsRetrieveUrl(projectId, id), {
-        ...options,
-        method: 'GET',
+    params?: ExternalDataSourcesJobsListParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : value.toString())
+        }
     })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/external_data_sources/${id}/jobs/?${stringifiedParams}`
+        : `/api/projects/${projectId}/external_data_sources/${id}/jobs/`
+}
+
+export const externalDataSourcesJobsList = async (
+    projectId: string,
+    id: string,
+    params?: ExternalDataSourcesJobsListParams,
+    options?: RequestInit
+): Promise<PaginatedExternalDataJobSerializersListApi> => {
+    return apiMutator<PaginatedExternalDataJobSerializersListApi>(
+        getExternalDataSourcesJobsListUrl(projectId, id, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
 }
 
 /**
@@ -1156,14 +1180,14 @@ export const getExternalDataSourcesDatabaseSchemaCreateUrl = (projectId: string)
 
 export const externalDataSourcesDatabaseSchemaCreate = async (
     projectId: string,
-    externalDataSourceSerializersApi: NonReadonly<ExternalDataSourceSerializersApi>,
+    databaseSchemaRequestApi: DatabaseSchemaRequestApi,
     options?: RequestInit
 ): Promise<void> => {
     return apiMutator<void>(getExternalDataSourcesDatabaseSchemaCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(externalDataSourceSerializersApi),
+        body: JSON.stringify(databaseSchemaRequestApi),
     })
 }
 

@@ -120,9 +120,6 @@ tools:
     external-data-sources-delete-webhook-create:
         operation: external_data_sources_delete_webhook_create
         enabled: false
-    external-data-sources-jobs-retrieve:
-        operation: external_data_sources_jobs_retrieve
-        enabled: false
     external-data-sources-refresh-schemas-create:
         operation: external_data_sources_refresh_schemas_create
         enabled: false
@@ -299,4 +296,7 @@ tools:
         enabled: false
     external-data-sources-bulk-update-schemas-partial-update:
         operation: external_data_sources_bulk_update_schemas_partial_update
+        enabled: false
+    external-data-sources-jobs-list:
+        operation: external_data_sources_jobs_list
         enabled: false
