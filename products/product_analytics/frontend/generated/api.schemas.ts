@@ -2690,6 +2690,7 @@ export type RetentionEntityKindApi = (typeof RetentionEntityKindApi)[keyof typeo
 export const RetentionEntityKindApi = {
     ActionsNode: 'ActionsNode',
     EventsNode: 'EventsNode',
+    DataWarehouseNode: 'DataWarehouseNode',
 } as const
 
 export type EntityTypeApi = (typeof EntityTypeApi)[keyof typeof EntityTypeApi]
@@ -2705,7 +2706,17 @@ export const EntityTypeApi = {
 export interface RetentionEntityApi {
     /** @nullable */
     custom_name?: string | null
+    /**
+     * Data warehouse field used as the actor identifier
+     * @nullable
+     */
+    distinct_id_field?: string | null
     id?: string | number | null
+    /**
+     * Data warehouse row identifier field
+     * @nullable
+     */
+    id_field?: string | null
     kind?: RetentionEntityKindApi | null
     /** @nullable */
     name?: string | null
@@ -2739,6 +2750,16 @@ export interface RetentionEntityApi {
               | WorkflowVariablePropertyFilterApi
           )[]
         | null
+    /**
+     * Data warehouse table name
+     * @nullable
+     */
+    table_name?: string | null
+    /**
+     * Data warehouse timestamp field
+     * @nullable
+     */
+    timestamp_field?: string | null
     type?: EntityTypeApi | null
     /** @nullable */
     uuid?: string | null
