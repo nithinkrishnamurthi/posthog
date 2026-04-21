@@ -1056,7 +1056,7 @@ jobs:
 
         name: Django tests – ${{ matrix.segment }}${{ matrix.compat && ' compat' || '' }} (persons-on-events ${{ matrix.person-on-events && 'on' || 'off' }}), Py ${{ matrix.python-version }}, ${{ matrix.clickhouse-server-image }} (${{matrix.group}}/${{ matrix.concurrency }})
         # Runner type is performance-critical — consult #team-devex before changing
-        runs-on: depot-ubuntu-latest-4
+        runs-on: depot-ubuntu-latest
 
         strategy:
             fail-fast: false
@@ -1096,7 +1096,8 @@ jobs:
               shell: bash
               env:
                   COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml
-                  COMPOSE_PROFILES: temporal,azure
+                  # Only start temporal services for Temporal test segment (Core/POE don't need them)
+                  COMPOSE_PROFILES: ${{ matrix.segment == 'Temporal' && 'temporal,azure' || 'azure' }}
                   CLICKHOUSE_SERVER_IMAGE: ${{ matrix.clickhouse-server-image || needs.get_clickhouse_versions.outputs.oldest_supported_image }}
                   WAIT_FOR_DOCKER_LAUNCH_RETRIES: 3
                   WAIT_FOR_DOCKER_LAUNCH_RETRY_DELAY: 5
@@ -1216,7 +1217,7 @@ jobs:
               # background above and will be ready by the time temporal tests run.
               env:
                   COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml
-                  COMPOSE_PROFILES: temporal,azure
+                  COMPOSE_PROFILES: ${{ matrix.segment == 'Temporal' && 'temporal,azure' || 'azure' }}
                   CLICKHOUSE_SERVER_IMAGE: ${{ matrix.clickhouse-server-image || needs.get_clickhouse_versions.outputs.oldest_supported_image }}
               run: bin/ci-wait-for-docker wait
 
