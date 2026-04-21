@@ -1,13 +1,4 @@
-# CI performance overlay — disable durability guarantees for test databases.
-# Safe for tests (ephemeral data, no crash recovery needed).
+# CI performance overlay — disable Postgres durability for ephemeral test data.
 services:
     db:
-        command: >
-            postgres
-            -c fsync=off
-            -c synchronous_commit=off
-            -c full_page_writes=off
-            -c random_page_cost=1.0
-            -c effective_cache_size=1GB
-            -c shared_buffers=256MB
-            -c work_mem=64MB
+        command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
