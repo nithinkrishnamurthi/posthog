@@ -1,12 +1,103 @@
 {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "properties": {
+        "cdc_table_mode": {
+            "anyOf": [
+                {
+                    "anyOf": [
+                        {
+                            "description": "* `consolidated` - consolidated\n* `cdc_only` - cdc_only\n* `both` - both",
+                            "enum": ["consolidated", "cdc_only", "both"],
+                            "type": "string"
+                        },
+                        {
+                            "const": null,
+                            "type": "null"
+                        }
+                    ]
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "For CDC syncs: consolidated, cdc_only, or both.\n\n* `consolidated` - consolidated\n* `cdc_only` - cdc_only\n* `both` - both"
+        },
         "id": {
             "description": "A UUID string identifying this external data schema.",
             "type": "string"
         },
+        "incremental_field": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "Column name used to track sync progress."
+        },
+        "incremental_field_type": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "Data type of the incremental field."
+        },
+        "primary_key_columns": {
+            "anyOf": [
+                {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "Column names for primary key deduplication."
+        },
         "should_sync": {
             "type": "boolean"
+        },
+        "sync_frequency": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "How often to sync: 30min, 1hour, 6hour, 12hour, or 24hour."
+        },
+        "sync_time_of_day": {
+            "anyOf": [
+                {
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?$",
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "UTC time of day to run the sync (HH:MM:SS)."
+        },
+        "sync_type": {
+            "anyOf": [
+                {
+                    "type": "string"
+                },
+                {
+                    "type": "null"
+                }
+            ],
+            "description": "Sync strategy: incremental, full_refresh, append, or cdc."
         }
     },
     "required": ["id"],
