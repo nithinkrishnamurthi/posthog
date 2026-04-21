@@ -1001,12 +1001,12 @@ jobs:
                   ')
 
                   temporal=$(jq -cn --arg image "$OLDEST_SUPPORTED_IMAGE" '
-                    [range(1; 10) | {
+                    [range(1; 8) | {
                       segment: "Temporal",
                       "person-on-events": false,
                       "python-version": "3.12.12",
                       "clickhouse-server-image": $image,
-                      concurrency: 9,
+                      concurrency: 7,
                       group: .,
                       artifact_key: ("temporal-" + (.|tostring)),
                       compat: false
