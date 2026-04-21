@@ -105,7 +105,6 @@ def _load_insight_for_grant(user, resource_type: str, resource_id: str, request:
     grants = GuestResourceGrant.objects.filter(
         organization_membership__user=user,
         organization_membership__is_guest=True,
-        is_pending=False,
         resource=resource_type,
         resource_id=resource_id,
     )
