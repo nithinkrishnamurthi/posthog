@@ -975,12 +975,12 @@ jobs:
                   # :NOTE: Keep shard counts/group ranges in sync with historical Django matrix tuning.
                   # Consult #team-devex before changing.
                   core=$(jq -cn --arg image "$OLDEST_SUPPORTED_IMAGE" '
-                    [range(1; 45) | {
+                    [range(1; 49) | {
                       segment: "Core",
                       "person-on-events": false,
                       "python-version": "3.12.12",
                       "clickhouse-server-image": $image,
-                      concurrency: 44,
+                      concurrency: 48,
                       group: .,
                       artifact_key: ("core-" + (.|tostring)),
                       compat: false
@@ -1270,15 +1270,8 @@ jobs:
                   PERSON_ON_EVENTS_V2_ENABLED: ${{ matrix.person-on-events && 'true' || 'false' }}
               shell: bash
               run: | # async_migrations covered in ci-async-migrations.yml
-                  # CI speedup: on PR runs, deselect tests that take >30s (129 tests, ~7331s total).
-                  # These still run on master pushes to maintain full test coverage.
-                  DESELECT_ARGS=""
-                  if [ "${{ github.event_name }}" = "pull_request" ] && [ -f .github/slow-tests-skip.txt ]; then
-                      DESELECT_ARGS=$(awk '{printf "--deselect \"%s\" ", $0}' .github/slow-tests-skip.txt)
-                      echo "::notice::Deselecting $(wc -l < .github/slow-tests-skip.txt) slow tests on this PR run (run on master for full coverage)"
-                  fi
                   set +e
-                  eval pytest -v --tb=short ${{
+                  pytest -v --tb=short ${{
                       matrix.compat
                       && env.CLICKHOUSE_COMPAT_PYTEST_TARGETS
                       || (
@@ -1286,7 +1279,7 @@ jobs:
                       && './posthog/clickhouse/ ./posthog/queries/ ./posthog/api/test/test_insight* ./posthog/api/test/dashboards/test_dashboard.py'
                       || 'posthog'
                       )
-                  }} ${{ matrix.compat && '' || (matrix.person-on-events && 'ee/clickhouse/' || 'ee/') }} -m '"not async_migrations"' \
+                  }} ${{ matrix.compat && '' || (matrix.person-on-events && 'ee/clickhouse/' || 'ee/') }} -m "not async_migrations" \
                       --ignore=posthog/temporal \
                       --ignore=posthog/dags \
                       --ignore=common/hogvm/python/test \
@@ -1298,7 +1291,6 @@ jobs:
                       --reruns 2 --reruns-delay 1 \
                       -r fEsxX \
                       --junitxml=junit-core.xml \
-                      $DESELECT_ARGS \
                       $PYTEST_ARGS
                   exit_code=$?
                   set -e
