@@ -75,8 +75,8 @@
     <background_message_broker_schedule_pool_size>10</background_message_broker_schedule_pool_size>
     <max_thread_pool_size>10000</max_thread_pool_size>
 
-    <!-- how many threads merge files — 1 is enough for dev/CI (saves CPU for queries) -->
-    <background_pool_size>1</background_pool_size>
+    <!-- how many threads merge files, default is 16 -->
+    <background_pool_size>4</background_pool_size>
 
     <!-- Number of workers to recycle connections in background (see also drain_timeout).
          If the pool is full, connection will be drained synchronously. -->
@@ -187,12 +187,16 @@
 
     <!-- Query log. Used only for queries with setting log_queries = 1. -->
     <query_log>
+        <!-- What table to insert data. If table is not exist, it will be created.
+             When query log structure is changed after system update,
+              then old table will be renamed and new table will be created automatically.
+        -->
         <database>system</database>
         <table>query_log</table>
         <partition_by>toYYYYMM(event_date)</partition_by>
 
-        <!-- Flush less frequently to reduce I/O (dev/CI) -->
-        <flush_interval_milliseconds>30000</flush_interval_milliseconds>
+        <!-- Interval of flushing data. -->
+        <flush_interval_milliseconds>500</flush_interval_milliseconds>
         <!-- Maximal size in lines for the logs. When non-flushed logs amount reaches max_size, logs dumped to the disk. -->
         <max_size_rows>8388608</max_size_rows>
         <!-- Pre-allocated size in lines for the logs. -->
@@ -429,9 +433,8 @@
     </query_masking_rules>
 
     <merge_tree>
-        <!-- Reduce background merges — dev/CI doesn't need aggressive storage optimization -->
-        <max_bytes_to_merge_at_max_space_in_pool>1048576</max_bytes_to_merge_at_max_space_in_pool>
-        <number_of_free_entries_in_pool_to_execute_mutation>1</number_of_free_entries_in_pool_to_execute_mutation>
-        <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>1</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
+        <max_bytes_to_merge_at_max_space_in_pool>1073741824</max_bytes_to_merge_at_max_space_in_pool>
+        <number_of_free_entries_in_pool_to_execute_mutation>2</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_execute_optimize_entire_partition>2</number_of_free_entries_in_pool_to_execute_optimize_entire_partition>
     </merge_tree>
 </clickhouse>

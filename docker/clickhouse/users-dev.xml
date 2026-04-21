@@ -32,7 +32,6 @@
             <insert_distributed_sync>1</insert_distributed_sync>
             <throw_on_max_partitions_per_insert_block>false</throw_on_max_partitions_per_insert_block>
             <number_of_mutations_to_throw>1</number_of_mutations_to_throw>
-            <!-- Don't wait for mutations to complete — faster for dev/CI -->
             <mutations_sync>0</mutations_sync>
 
             <stream_poll_timeout_ms>50</stream_poll_timeout_ms>
