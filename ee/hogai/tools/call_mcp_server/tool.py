@@ -29,10 +29,6 @@ from .installations import (
 )
 from .mcp_client import MCPClient, MCPClientError
 
-# New tools that haven't been seen by `sync_installation_tools` yet, or tools
-# the user explicitly set to `needs_approval`, both fall here. Treating unknowns
-# as needs_approval matches the settings UI default and keeps the agent from
-# silently running tools the user hasn't opted into.
 _APPROVAL_DEFAULT = "needs_approval"
 
 logger = structlog.get_logger(__name__)
@@ -88,9 +84,7 @@ class CallMCPServerTool(MaxTool):
     _installations: list
     _installations_by_url: dict[str, dict]
     _server_headers: dict[str, dict[str, str]]
-    # Lazily populated per server_url: {tool_name: approval_state}. We fetch on
-    # first access for each server rather than up-front because the agent often
-    # only touches one server in a turn, and the DB read isn't free at scale.
+    # {server_url: {tool_name: approval_state}} — lazily populated to minimize DB reads; also seeded by _get_cached_tool_list to avoid double lookup when calling __list_tools__
     _approval_cache: dict[str, dict[str, str]]
 
     @classmethod
@@ -153,8 +147,7 @@ class CallMCPServerTool(MaxTool):
     async def is_dangerous_operation(
         self, *, server_url: str, tool_name: str, arguments: dict | None = None, **_kwargs
     ) -> bool:
-        # Tool discovery never requires approval — the agent must be free to
-        # enumerate what's available before it can plan a call.
+        # Tool discovery should never require approval
         if tool_name == "__list_tools__":
             return False
         # Unknown server_url will be rejected by _validate_server_url during
@@ -182,10 +175,7 @@ class CallMCPServerTool(MaxTool):
     async def _arun_impl(self, server_url: str, tool_name: str, arguments: dict | None = None) -> tuple[str, None]:
         self._validate_server_url(server_url)
 
-        # Serve `__list_tools__` from the per-installation cache when we have
-        # one — it already reflects the authoritative tool set (sync runs on
-        # install, OAuth completion, and the "Refresh tools" button). Skipping
-        # the upstream round-trip here also saves a proactive token refresh.
+        # Use per-installation cache for `__list_tools__` if available to avoid unnecessary server calls and token refreshes.
         if tool_name == "__list_tools__":
             cached = await self._get_cached_tool_list(server_url)
             if cached is not None:

@@ -51,9 +51,6 @@ class TestCallMCPServerTool(BaseTest):
     def _create_tool(self, installations: list[dict] | None = None, conversation_id: str | None = None):
         if installations is None:
             installations = []
-        # Ensure every installation has an id — the approval-state resolver reads
-        # inst["id"] to look up per-tool state. Tests that don't care about
-        # approval state get a throwaway uuid; the DB lookup just returns empty.
         for inst in installations:
             inst.setdefault("id", str(uuid.uuid4()))
         allowed_urls = {inst["url"] for inst in installations}
@@ -498,8 +495,6 @@ class TestRefreshTokenFromMetadata(TestCallMCPServerTool):
     SERVER_URL = "https://mcp.linear.app/mcp"
 
     async def test_refresh_uses_server_metadata(self):
-        # Post-refactor: metadata lives on the installation, client_id under
-        # sensitive_configuration["dcr_client_id"] for user-added servers.
         sensitive_config = {
             "access_token": "old-token",
             "refresh_token": "rt",
@@ -545,8 +540,6 @@ class TestRefreshTokenPersistence(TestCallMCPServerTool):
     OAUTH_CLIENT_ID = "dcr-client-123"
 
     def _install_oauth_server(self, sensitive_config: dict | None = None):
-        # Post-refactor: DCR creds live on the installation's sensitive_configuration
-        # and metadata lives on installation.oauth_metadata (see migration 0007).
         sensitive = dict(sensitive_config or {})
         sensitive.setdefault("dcr_client_id", self.OAUTH_CLIENT_ID)
         return MCPServerInstallation.objects.create(
