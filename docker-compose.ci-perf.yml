@@ -1,6 +1,0 @@
-# CI performance overlay — mounts ClickHouse performance config
-# and changes insert behavior for faster test execution.
-services:
-    clickhouse:
-        volumes:
-            - ./docker/clickhouse/config.d/ci-performance.xml:/etc/clickhouse-server/config.d/ci-performance.xml
