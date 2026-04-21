@@ -1289,6 +1289,7 @@ jobs:
                       --durations=1000 --durations-min=1.0 --store-durations \
                       --splitting-algorithm=duration_based_chunks \
                       --reruns 2 --reruns-delay 1 \
+                      -n 2 --dist loadfile \
                       -r fEsxX \
                       --junitxml=junit-core.xml \
                       $PYTEST_ARGS
