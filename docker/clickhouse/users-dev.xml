@@ -32,13 +32,12 @@
             <insert_distributed_sync>1</insert_distributed_sync>
             <throw_on_max_partitions_per_insert_block>false</throw_on_max_partitions_per_insert_block>
             <number_of_mutations_to_throw>1</number_of_mutations_to_throw>
-            <mutations_sync>0</mutations_sync>
 
             <stream_poll_timeout_ms>50</stream_poll_timeout_ms>
             <stream_flush_interval_ms>500</stream_flush_interval_ms>
 
             <!-- Development performance optimizations -->
-            <max_threads>2</max_threads>
+            <max_threads>4</max_threads>
             <background_merges_mutations_concurrency_ratio>1</background_merges_mutations_concurrency_ratio>
 
         </default>
