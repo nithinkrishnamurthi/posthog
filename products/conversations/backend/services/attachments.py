@@ -12,6 +12,48 @@ from posthog.models.uploaded_media import UploadedMedia, save_content_to_object_
 
 logger = structlog.get_logger(__name__)
 
+# Strict allowlist of MIME types that may be persisted as uploaded media.
+# Anything outside this set — notably text/html, image/svg+xml, and other
+# script-capable formats — would be stored and later served from the
+# unauthenticated /uploaded_media endpoint, which is an XSS vector.
+ALLOWED_ATTACHMENT_CONTENT_TYPES = frozenset(
+    {
+        # Raster images only — SVG is deliberately excluded because it can
+        # contain executable script.
+        "image/png",
+        "image/jpeg",
+        "image/jpg",
+        "image/gif",
+        "image/webp",
+        "image/avif",
+        "image/bmp",
+        "image/heic",
+        "image/heif",
+        # Documents
+        "application/pdf",
+        "text/plain",
+        "text/csv",
+        "application/zip",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+)
+
+
+def _normalize_content_type(content_type: str) -> str:
+    """Lowercase and strip any parameters (e.g. ``; charset=utf-8``)."""
+    if not content_type:
+        return ""
+    return content_type.split(";", 1)[0].strip().lower()
+
+
+def is_allowed_content_type(content_type: str) -> bool:
+    return _normalize_content_type(content_type) in ALLOWED_ATTACHMENT_CONTENT_TYPES
+
 
 def is_valid_image(content: bytes) -> bool:
     """Verify bytes are a real image (prevents serving disguised malicious content).
@@ -45,7 +87,17 @@ def save_file_to_uploaded_media(
         logger.warning("conversations_attachment_no_object_storage", team_id=team.id)
         return None
 
-    if validate_images and content_type.startswith("image/") and not is_valid_image(content):
+    normalized_content_type = _normalize_content_type(content_type)
+    if not is_allowed_content_type(normalized_content_type):
+        logger.warning(
+            "conversations_attachment_disallowed_content_type",
+            team_id=team.id,
+            file_name=file_name,
+            content_type=content_type,
+        )
+        return None
+
+    if validate_images and normalized_content_type.startswith("image/") and not is_valid_image(content):
         logger.warning("conversations_attachment_invalid_image", team_id=team.id, file_name=file_name)
         return None
 

@@ -901,6 +901,51 @@ class TestEmailInboundAttachments(BaseTest):
 
     @patch("products.conversations.backend.services.attachments.save_content_to_object_storage")
     @patch("products.conversations.backend.api.email_events.validate_webhook_signature", return_value=True)
+    def test_inbound_html_attachment_is_rejected(self, _mock_sig: MagicMock, mock_storage: MagicMock):
+        # An attacker emails an HTML attachment to the team inbox. Prior to the fix,
+        # this bypassed image validation and was stored with content_type=text/html,
+        # enabling stored XSS when a support agent opened the attachment link.
+        html_payload = SimpleUploadedFile(
+            "evil.html",
+            b"<html><body><script>alert(document.cookie)</script></body></html>",
+            content_type="text/html",
+        )
+
+        data = self._base_post_data("<html@test.com>")
+        with self.settings(OBJECT_STORAGE_ENABLED=True):
+            response = self.client.post("/api/conversations/v1/email/inbound", {**data, "attachment-1": html_payload})
+
+        assert response.status_code == 200
+        mock_storage.assert_not_called()
+
+        comment = Comment.objects.filter(team=self.team, scope="conversations_ticket").first()
+        assert comment is not None
+        assert comment.item_context.get("email_attachments") is None
+
+    @patch("products.conversations.backend.services.attachments.save_content_to_object_storage")
+    @patch("products.conversations.backend.api.email_events.validate_webhook_signature", return_value=True)
+    def test_inbound_svg_attachment_is_rejected(self, _mock_sig: MagicMock, mock_storage: MagicMock):
+        # SVG files are image/* but can embed JavaScript; they must not be stored
+        # with a content_type that browsers render inline.
+        svg_payload = SimpleUploadedFile(
+            "evil.svg",
+            b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+            content_type="image/svg+xml",
+        )
+
+        data = self._base_post_data("<svg@test.com>")
+        with self.settings(OBJECT_STORAGE_ENABLED=True):
+            response = self.client.post("/api/conversations/v1/email/inbound", {**data, "attachment-1": svg_payload})
+
+        assert response.status_code == 200
+        mock_storage.assert_not_called()
+
+        comment = Comment.objects.filter(team=self.team, scope="conversations_ticket").first()
+        assert comment is not None
+        assert comment.item_context.get("email_attachments") is None
+
+    @patch("products.conversations.backend.services.attachments.save_content_to_object_storage")
+    @patch("products.conversations.backend.api.email_events.validate_webhook_signature", return_value=True)
     def test_inbound_no_attachments_unchanged(self, _mock_sig: MagicMock, mock_storage: MagicMock):
         data = self._base_post_data("<plain@test.com>")
         with self.settings(OBJECT_STORAGE_ENABLED=True):
