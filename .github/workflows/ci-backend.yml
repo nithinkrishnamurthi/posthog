@@ -1095,7 +1095,7 @@ jobs:
             - name: Stop/Start stack with Docker Compose
               shell: bash
               env:
-                  COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml:docker-compose.ci-perf.yml
+                  COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml
                   COMPOSE_PROFILES: temporal,azure
                   CLICKHOUSE_SERVER_IMAGE: ${{ matrix.clickhouse-server-image || needs.get_clickhouse_versions.outputs.oldest_supported_image }}
                   WAIT_FOR_DOCKER_LAUNCH_RETRIES: 3
@@ -1215,7 +1215,7 @@ jobs:
               # boots slowly (auto-setup runs DB migrations). Temporal was started in
               # background above and will be ready by the time temporal tests run.
               env:
-                  COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml:docker-compose.ci-perf.yml
+                  COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml
                   COMPOSE_PROFILES: temporal,azure
                   CLICKHOUSE_SERVER_IMAGE: ${{ matrix.clickhouse-server-image || needs.get_clickhouse_versions.outputs.oldest_supported_image }}
               run: bin/ci-wait-for-docker wait
