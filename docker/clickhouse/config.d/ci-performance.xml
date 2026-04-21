@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <!-- CI/Dev performance: reduce background merge threads (saves CPU for queries) -->
+    <background_pool_size>1</background_pool_size>
+</clickhouse>
