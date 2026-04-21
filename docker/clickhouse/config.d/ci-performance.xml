@@ -47,4 +47,9 @@
     <opentelemetry_span_log remove="remove"/>
     <backup_log remove="remove"/>
     <crash_log remove="remove"/>
+
+    <!-- Disable distributed_ddl — single node doesn't need DDL queue via Keeper -->
+    <distributed_ddl>
+        <path></path>
+    </distributed_ddl>
 </clickhouse>
