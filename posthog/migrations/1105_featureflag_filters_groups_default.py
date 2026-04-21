@@ -14,15 +14,4 @@ class Migration(migrations.Migration):
             name="filters",
             field=models.JSONField(default=posthog.models.feature_flag.feature_flag.default_filters),
         ),
-        # Idempotent backfill enforcing the groups-key invariant on existing rows.
-        migrations.RunSQL(
-            sql="""
-                UPDATE posthog_featureflag
-                SET filters = COALESCE(filters, '{}'::jsonb) || '{"groups": []}'::jsonb
-                WHERE filters IS NULL
-                   OR NOT (filters ? 'groups');
-            """,
-            reverse_sql=migrations.RunSQL.noop,
-            elidable=True,
-        ),
     ]
