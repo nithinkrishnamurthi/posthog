@@ -1412,6 +1412,9 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
             data={"added": len(schemas_created), "deleted": len(schemas_deleted)},
         )
 
+    # OpenAPI annotation only — the body also contains source-specific credential
+    # fields that vary per source_type, so the serializer cannot declare them all.
+    # The action reads the full request.data for validate_config/parse_config.
     @extend_schema(request=DatabaseSchemaRequestSerializer)
     @action(methods=["POST"], detail=False)
     def database_schema(self, request: Request, *arg: Any, **kwargs: Any):
