@@ -474,3 +474,9 @@ tools:
     external-data-sources-bulk-update-schemas-partial-update:
         operation: external_data_sources_bulk_update_schemas_partial_update
         enabled: false
+    insight-variables-list:
+        operation: insight_variables_list
+        enabled: false
+    insight-variables-retrieve:
+        operation: insight_variables_retrieve
+        enabled: false
