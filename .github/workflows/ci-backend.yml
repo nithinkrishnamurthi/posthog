@@ -1216,9 +1216,52 @@ jobs:
               # background above and will be ready by the time temporal tests run.
               env:
                   COMPOSE_FILE: docker-compose.dev.yml:docker-compose.profiles.yml
-                  COMPOSE_PROFILES: ${{ matrix.segment == 'Temporal' && 'temporal,azure' || 'azure' }}
+                  COMPOSE_PROFILES: temporal,azure
                   CLICKHOUSE_SERVER_IMAGE: ${{ matrix.clickhouse-server-image || needs.get_clickhouse_versions.outputs.oldest_supported_image }}
               run: bin/ci-wait-for-docker wait
+
+            # CI speedup: download the migrated DB schema from master and restore it so
+            # Django's --reuse-db finds a pre-migrated test DB, skipping ~30-60s of
+            # migrations per shard. Fails gracefully — if artifact unavailable, Django
+            # will run migrations normally.
+            - name: Download migrated schema from master
+              id: download-schema
+              if: ${{ needs.changes.outputs.backend == 'true' && matrix.segment == 'Core' && !matrix.compat }}
+              uses: dawidd6/action-download-artifact@20319c5641d495c8a52e688b7dc5fada6c3a9fbc # v8
+              with:
+                  workflow: ci-backend.yml
+                  branch: master
+                  name: migrated-schema
+                  path: /tmp/master-schema
+                  search_artifacts: true
+                  if_no_artifact_found: warn
+              continue-on-error: true
+
+            - name: Restore migrated schema into test database
+              if: ${{ steps.download-schema.outcome == 'success' && hashFiles('/tmp/master-schema/schema.sql.gz') != '' }}
+              shell: bash
+              env:
+                  PGPASSWORD: posthog
+              run: |
+                  # Pre-create the Django test DB with master's migrated schema.
+                  # Django's --reuse-db will skip migrations since django_migrations table is populated.
+                  set -e
+                  DB_HOST="${DATABASE_URL##*@}"
+                  DB_HOST="${DB_HOST%%:*}"
+                  DB_PORT="${DATABASE_URL##*:}"
+                  DB_PORT="${DB_PORT%%/*}"
+                  echo "Restoring schema into test_posthog at ${DB_HOST}:${DB_PORT}"
+                  # Drop any existing test_posthog (safety) and recreate
+                  psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d postgres \
+                    -c "DROP DATABASE IF EXISTS test_posthog;" \
+                    -c "CREATE DATABASE test_posthog OWNER posthog;"
+                  # Load schema (schema dump uses --clean which references db name — restore to test_posthog directly)
+                  gunzip -c /tmp/master-schema/schema.sql.gz | \
+                    psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d test_posthog \
+                    --set ON_ERROR_STOP=0 > /tmp/restore.log 2>&1 || true
+                  # Verify django_migrations populated
+                  MIGRATION_COUNT=$(psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d test_posthog -tAc "SELECT count(*) FROM django_migrations;" 2>/dev/null || echo "0")
+                  echo "::notice::Pre-restored schema with $MIGRATION_COUNT migrations — Django --reuse-db will skip migrations"
 
             - name: Determine if --snapshot-update should be on
               # UPDATE mode: human commits - update snapshots
