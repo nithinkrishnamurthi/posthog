@@ -6,17 +6,13 @@ import posthog.models.feature_flag.feature_flag
 
 
 class Migration(migrations.Migration):
-    dependencies = [
-        ("posthog", "1104_alter_organization_is_ai_data_processing_approved")
-    ]
+    dependencies = [("posthog", "1104_alter_organization_is_ai_data_processing_approved")]
 
     operations = [
         migrations.AlterField(
             model_name="featureflag",
             name="filters",
-            field=models.JSONField(
-                default=posthog.models.feature_flag.feature_flag.default_filters
-            ),
+            field=models.JSONField(default=posthog.models.feature_flag.feature_flag.default_filters),
         ),
         # Idempotent backfill enforcing the groups-key invariant on existing rows.
         migrations.RunSQL(
