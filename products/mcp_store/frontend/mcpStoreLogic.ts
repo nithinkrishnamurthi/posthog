@@ -6,13 +6,6 @@ import { actionToUrl, router, urlToAction } from 'kea-router'
 import { lemonToast } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
-import { removeProjectIdIfPresent } from 'lib/utils/router-utils'
-
-// Path of the Settings section this product lives under. Used for OAuth
-// redirect landing + the ?mcp=<id> detail-view URL pattern. Matches the
-// section id in SettingsMap; the actual browser URL may be prefixed with
-// /project/<team_id> which we strip before comparing.
-const SETTINGS_PATH = '/settings/mcp-servers'
 
 import type {
     MCPServerInstallationApi,
@@ -439,35 +432,28 @@ export const mcpStoreLogic = kea<mcpStoreLogicType>([
         },
     })),
 
-    actionToUrl(() => {
-        // MCP lives as a Settings section only — the scene has no URL of its
-        // own. We piggyback on the Settings URL + a ?mcp=<id> search param so
-        // that selecting a server adds a history entry and the browser back
-        // button returns the user to the marketplace view.
-        return {
-            selectServer: ({ serverId }) => {
-                const rawPathname = router.values.location.pathname
-                if (removeProjectIdIfPresent(rawPathname) !== SETTINGS_PATH) {
-                    return undefined
-                }
-                const searchParams = router.values.searchParams ?? {}
-                const hashParams = router.values.hashParams ?? {}
-                const currentMcp = (searchParams as Record<string, any>).mcp ?? null
-                if (currentMcp === (serverId ?? null)) {
-                    return undefined
-                }
-                const nextSearch: Record<string, any> = { ...searchParams }
-                if (serverId) {
-                    nextSearch.mcp = serverId
-                } else {
-                    delete nextSearch.mcp
-                }
-                // Preserve any existing hash (settings' sub-setting fragment) untouched.
-                // Return the raw pathname so kea-router keeps the project prefix intact.
-                return [rawPathname, nextSearch, hashParams]
-            },
-        }
-    }),
+    // MCP lives as a Settings section only — the scene has no URL of its own.
+    // We piggyback on the current Settings URL + a ?mcp=<id> search param so
+    // selecting a server adds a history entry and browser-back returns to the
+    // marketplace view. The pathname is read live from the router so we never
+    // hardcode the settings path here (SettingsMap owns the section id).
+    actionToUrl(() => ({
+        selectServer: ({ serverId }) => {
+            const { pathname } = router.values.location
+            const searchParams: Record<string, any> = { ...router.values.searchParams }
+            const hashParams = router.values.hashParams ?? {}
+            const currentMcp = searchParams.mcp ?? null
+            if (currentMcp === (serverId ?? null)) {
+                return undefined
+            }
+            if (serverId) {
+                searchParams.mcp = serverId
+            } else {
+                delete searchParams.mcp
+            }
+            return [pathname, searchParams, hashParams]
+        },
+    })),
 
     urlToAction(({ actions, values }) => {
         const handleOAuthCallback = (searchParams: Record<string, any>): void => {
@@ -475,15 +461,21 @@ export const mcpStoreLogic = kea<mcpStoreLogicType>([
                 lemonToast.success('Server connected')
                 actions.loadInstallations()
                 actions.loadServers()
-                router.actions.replace(SETTINGS_PATH)
+                router.actions.replace(router.values.location.pathname)
             } else if (searchParams.oauth_error) {
                 lemonToast.error('OAuth authorization failed')
-                router.actions.replace(SETTINGS_PATH)
+                router.actions.replace(router.values.location.pathname)
             }
         }
 
         return {
-            [SETTINGS_PATH]: (_, searchParams) => {
+            // Match any settings section and filter to ours in-body. The
+            // literal 'mcp-servers' matches the section id in SettingsMap.tsx;
+            // it's not a URL path, so there's no duplication with urls.ts.
+            '/settings/:section': ({ section }, searchParams) => {
+                if (section !== 'mcp-servers') {
+                    return
+                }
                 const mcpId = searchParams?.mcp ?? null
                 if (values.selectedServerId !== mcpId) {
                     actions.selectServer(mcpId)
