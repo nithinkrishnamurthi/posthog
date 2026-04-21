@@ -1,0 +1,23 @@
+# CI performance overlay — tmpfs mounts for database services
+# Speeds up all database I/O by using RAM instead of disk.
+# Safe for tests (small datasets, ephemeral data).
+services:
+    db:
+        tmpfs:
+            - /var/lib/postgresql/data
+        environment:
+            POSTGRES_HOST_AUTH_METHOD: trust
+        command: >
+            postgres
+            -c fsync=off
+            -c synchronous_commit=off
+            -c full_page_writes=off
+            -c random_page_cost=1.0
+
+    clickhouse:
+        tmpfs:
+            - /var/lib/clickhouse
+        ulimits:
+            nofile:
+                soft: 262144
+                hard: 262144
