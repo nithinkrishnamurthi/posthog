@@ -754,7 +754,7 @@ class ExternalDataSourceViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixi
     search_fields = ["source_id"]
     ordering = "-created_at"
 
-    def get_serializer_class(self):
+    def get_serializer_class(self) -> type[serializers.Serializer]:
         if self.action == "create":
             return ExternalDataSourceCreateSerializer
         if self.action == "database_schema":
