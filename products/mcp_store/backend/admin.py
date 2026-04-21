@@ -25,9 +25,11 @@ class MCPServerTemplateAdminForm(forms.ModelForm):
         fields = (
             "name",
             "url",
+            "docs_url",
             "description",
             "auth_type",
             "icon_key",
+            "category",
             "oauth_issuer_url",
             "oauth_metadata",
             "is_active",
