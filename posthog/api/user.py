@@ -71,7 +71,8 @@ from posthog.event_usage import (
 from posthog.helpers.session_cache import SessionCache
 from posthog.helpers.two_factor_session import set_two_factor_verified_in_session
 from posthog.middleware import get_impersonated_session_expires_at, is_read_only_impersonation
-from posthog.models import Team, User, UserScenePersonalisation
+from posthog.models import OrganizationMembership, Team, User, UserScenePersonalisation
+from posthog.models.guest_resource_grant import GuestResourceGrant
 from posthog.models.organization import Organization
 from posthog.models.user import NOTIFICATION_DEFAULTS, ROLE_CHOICES, Notifications, ShortcutPosition
 from posthog.permissions import APIScopePermission, TimeSensitiveActionPermission, UserNoOrgMembershipDeletePermission
@@ -121,6 +122,8 @@ class UserSerializer(serializers.ModelSerializer):
     scene_personalisation = ScenePersonalisationBasicSerializer(many=True, read_only=True)
     anonymize_data = ClassicBehaviorBooleanFieldSerializer()
     role_at_organization = serializers.ChoiceField(choices=ROLE_CHOICES, required=False)
+    is_guest_in_current_project = serializers.SerializerMethodField()
+    guest_grants = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -163,6 +166,8 @@ class UserSerializer(serializers.ModelSerializer):
             "shortcut_position",
             "role_at_organization",
             "passkeys_enabled_for_2fa",
+            "is_guest_in_current_project",
+            "guest_grants",
         ]
 
         read_only_fields = [
@@ -244,6 +249,43 @@ class UserSerializer(serializers.ModelSerializer):
         return bool(
             OrganizationDomain.objects.get_sso_enforcement_for_email_address(instance.email, organization=organization)
         )
+
+    def get_is_guest_in_current_project(self, instance: User) -> bool:
+        team = instance.team
+        if team is None:
+            return False
+        return OrganizationMembership.objects.filter(
+            user=instance,
+            organization_id=team.organization_id,
+            is_guest=True,
+        ).exists()
+
+    def get_guest_grants(self, instance: User) -> list[dict]:
+        team = instance.team
+        if team is None:
+            return []
+        try:
+            membership = OrganizationMembership.objects.get(
+                user=instance,
+                organization_id=team.organization_id,
+            )
+        except OrganizationMembership.DoesNotExist:
+            return []
+        if not membership.is_guest:
+            return []
+        grants = GuestResourceGrant.objects.filter(
+            organization_membership=membership,
+            is_pending=False,
+        ).select_related("team")
+        return [
+            {
+                "team_id": g.team_id,
+                "team_name": g.team.name if g.team else None,
+                "resource": g.resource,
+                "resource_id": g.resource_id,
+            }
+            for g in grants
+        ]
 
     def validate_set_current_organization(self, value: str) -> Organization:
         try:

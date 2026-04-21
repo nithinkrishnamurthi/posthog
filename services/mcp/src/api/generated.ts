@@ -20251,6 +20251,10 @@ export namespace Schemas {
       message?: string | null;
       /** List of team IDs and corresponding access levels to private projects. */
       private_project_access?: unknown | null;
+      /** List of {team_id, resource, resource_id} dicts describing resource grants the invitee should receive on acceptance. A non-empty list marks the invite as a guest invite. */
+      guest_resources?: unknown;
+      /** If true, the membership created on acceptance can authenticate with password even when the organization enforces SSO. Meaningful for guest invites where the invitee is external and may not be in the SSO directory. */
+      bypass_sso?: boolean;
       send_email?: boolean;
       combine_pending_invites?: boolean;
     }
@@ -22996,6 +23000,8 @@ export namespace Schemas {
 
     export type UserNotificationSettings = {[key: string]: unknown};
 
+    export type UserGuestGrantsItem = {[key: string]: unknown};
+
     export interface User {
       readonly date_joined: string;
       readonly uuid: string;
@@ -23054,6 +23060,8 @@ export namespace Schemas {
        * @nullable
        */
       passkeys_enabled_for_2fa?: boolean | null;
+      readonly is_guest_in_current_project: boolean;
+      readonly guest_grants: readonly UserGuestGrantsItem[];
     }
 
     export interface PaginatedUserList {
@@ -27206,6 +27214,8 @@ export namespace Schemas {
 
     export type PatchedUserNotificationSettings = {[key: string]: unknown};
 
+    export type PatchedUserGuestGrantsItem = {[key: string]: unknown};
+
     export interface PatchedUser {
       readonly date_joined?: string;
       readonly uuid?: string;
@@ -27264,6 +27274,8 @@ export namespace Schemas {
        * @nullable
        */
       passkeys_enabled_for_2fa?: boolean | null;
+      readonly is_guest_in_current_project?: boolean;
+      readonly guest_grants?: readonly PatchedUserGuestGrantsItem[];
     }
 
     export interface PatchedUserInterview {

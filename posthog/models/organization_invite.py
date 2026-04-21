@@ -177,6 +177,25 @@ class OrganizationInvite(ModelActivityMixin, UUIDTModel):
             self.validate(user=user)
         user.join(organization=self.organization, level=self.level)
 
+        new_membership = OrganizationMembership.objects.get(organization=self.organization, user=user)
+        if self.is_guest_invite:
+            # Guest memberships live alongside regular ones; their access is gated entirely by
+            # GuestResourceGrant rows (plus the mirroring AccessControl rows created below).
+            new_membership.is_guest = True
+            new_membership.save(update_fields=["is_guest", "updated_at"])
+
+            from posthog.rbac.guest_grants import apply_invite_grants
+
+            apply_invite_grants(self, new_membership)
+
+        # SSO-enforced orgs normally redirect on login; guests may sit outside the SSO
+        # directory. We propagate the invite flag onto the user object when a future
+        # `User.bypass_sso` field exists (added by a follow-up migration outside PR #2).
+        # The hasattr guard keeps this inert until the field lands.
+        if self.bypass_sso and hasattr(user, "bypass_sso"):
+            user.bypass_sso = True
+            user.save(update_fields=["bypass_sso"])
+
         for item in self.private_project_access or []:
             try:
                 team: Team = self.organization.teams.get(id=item["id"])

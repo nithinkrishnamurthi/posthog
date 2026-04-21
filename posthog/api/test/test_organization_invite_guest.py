@@ -1,0 +1,130 @@
+from posthog.test.base import APIBaseTest
+
+from rest_framework import status
+
+from posthog.constants import AvailableFeature
+from posthog.models import GuestResourceGrant, OrganizationInvite, OrganizationMembership
+from posthog.models.user import User
+
+from products.dashboards.backend.models.dashboard import Dashboard
+
+from ee.models.rbac.access_control import AccessControl
+
+
+class TestOrganizationInviteGuest(APIBaseTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.organization.available_product_features = [
+            {"key": AvailableFeature.ACCESS_CONTROL, "name": "Access control"}
+        ]
+        self.organization.save()
+        OrganizationMembership.objects.filter(organization=self.organization, user=self.user).update(
+            level=OrganizationMembership.Level.ADMIN
+        )
+        self.dashboard = Dashboard.objects.create(team=self.team, name="Granted dashboard")
+
+    def _base_payload(self, **overrides) -> dict:
+        payload = {
+            "target_email": "newguest@example.com",
+            "send_email": False,
+            "guest_resources": [
+                {
+                    "team_id": self.team.pk,
+                    "resource": "dashboard",
+                    "resource_id": str(self.dashboard.pk),
+                }
+            ],
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_non_admin_cannot_create_guest_invite(self) -> None:
+        OrganizationMembership.objects.filter(organization=self.organization, user=self.user).update(
+            level=OrganizationMembership.Level.MEMBER
+        )
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_access_control_feature_required(self) -> None:
+        self.organization.available_product_features = []
+        self.organization.save()
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("Advanced permissions", res.json()["detail"])
+
+    def test_nonexistent_resource_id_is_rejected(self) -> None:
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(
+                guest_resources=[{"team_id": self.team.pk, "resource": "dashboard", "resource_id": "99999"}]
+            ),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_admin_can_create_guest_invite(self) -> None:
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(bypass_sso=True),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        invite = OrganizationInvite.objects.get(id=res.json()["id"])
+        self.assertTrue(invite.is_guest_invite)
+        self.assertTrue(invite.bypass_sso)
+        self.assertEqual(len(invite.guest_resources), 1)
+
+    def test_accepting_guest_invite_creates_membership_grants_and_access_controls(self) -> None:
+        # Create invite as admin, then accept as a fresh user.
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            self._base_payload(),
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        invite = OrganizationInvite.objects.get(id=res.json()["id"])
+
+        invitee = User.objects.create_user(email="newguest@example.com", first_name="New Guest", password="password123")
+        invite.use(invitee)
+
+        membership = OrganizationMembership.objects.get(organization=self.organization, user=invitee)
+        self.assertTrue(membership.is_guest)
+
+        grant = GuestResourceGrant.objects.get(organization_membership=membership)
+        self.assertEqual(grant.resource, "dashboard")
+        self.assertEqual(grant.resource_id, str(self.dashboard.pk))
+        self.assertFalse(grant.is_pending)
+
+        self.assertTrue(
+            AccessControl.objects.filter(
+                organization_member=membership,
+                resource="dashboard",
+                resource_id=str(self.dashboard.pk),
+                access_level="viewer",
+            ).exists()
+        )
+
+    def test_regular_invite_does_not_create_guest_membership(self) -> None:
+        payload = {"target_email": "regular@example.com", "send_email": False}
+        res = self.client.post(
+            f"/api/organizations/{self.organization.id}/invites/",
+            payload,
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED, res.content)
+        invite = OrganizationInvite.objects.get(id=res.json()["id"])
+
+        invitee = User.objects.create_user(email="regular@example.com", first_name="Regular", password="password123")
+        invite.use(invitee)
+
+        membership = OrganizationMembership.objects.get(organization=self.organization, user=invitee)
+        self.assertFalse(membership.is_guest)
+        self.assertFalse(GuestResourceGrant.objects.filter(organization_membership=membership).exists())

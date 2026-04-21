@@ -123,6 +123,8 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
             "updated_at",
             "message",
             "private_project_access",
+            "guest_resources",
+            "bypass_sso",
             "send_email",
             "combine_pending_invites",
         ]
@@ -237,6 +239,30 @@ class OrganizationInviteSerializer(serializers.ModelSerializer):
                 )
 
         return private_project_access
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        guest_resources = attrs.get("guest_resources") or []
+        if not guest_resources:
+            return attrs
+
+        # Guest invites are admin+ only. Non-admins shouldn't be able to hand out scoped viewer
+        # access to arbitrary resources.
+        requesting_user: User = self.context["request"].user
+        try:
+            requesting_membership = OrganizationMembership.objects.get(
+                organization_id=self.context["organization_id"],
+                user=requesting_user,
+            )
+        except OrganizationMembership.DoesNotExist:
+            raise exceptions.PermissionDenied("You must be a member of the organization to send invites.")
+        if requesting_membership.level < OrganizationMembership.Level.ADMIN:
+            raise exceptions.PermissionDenied("Only organization admins and owners can create guest invites.")
+
+        organization = Organization.objects.get(id=self.context["organization_id"])
+        from posthog.rbac.guest_grants import validate_invite_grants
+
+        validate_invite_grants(organization, guest_resources)
+        return attrs
 
     def create(self, validated_data: dict[str, Any], *args: Any, **kwargs: Any) -> OrganizationInvite:
         if OrganizationMembership.objects.filter(
