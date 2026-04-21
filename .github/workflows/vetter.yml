@@ -1,0 +1,118 @@
+name: Vetter Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect PR context
+        id: ctx
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff "$BASE_SHA..$HEAD_SHA" > /tmp/pr.diff
+          gh pr view "$PR_NUMBER" --json title,body -q '.title + "\n\n" + (.body // "")' > /tmp/pr.summary
+
+          # Infer ticket from "Fixes #N" / "Closes #N" / "Resolves #N" in PR body.
+          ticket_issue=$(grep -iEo '(fixes|closes|resolves) #[0-9]+' /tmp/pr.summary | head -1 | grep -Eo '[0-9]+' || true)
+          if [ -n "$ticket_issue" ]; then
+            gh issue view "$ticket_issue" --json title,body -q '.title + "\n\n" + (.body // "")' > /tmp/pr.ticket
+          else
+            cp /tmp/pr.summary /tmp/pr.ticket
+          fi
+
+      - name: Kick off vetter run
+        id: vet
+        env:
+          VETTER_API_BASE: ${{ vars.VETTER_API_BASE }}
+          VETTER_ENV_ID:   ${{ vars.VETTER_ENV_ID }}
+          VETTER_API_KEY:  ${{ secrets.VETTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          payload=$(jq -n \
+            --rawfile ticket  /tmp/pr.ticket \
+            --rawfile summary /tmp/pr.summary \
+            --rawfile diff    /tmp/pr.diff \
+            '{ticket: $ticket, summary: $summary, diff: $diff}')
+          resp=$(curl -fsSL -X POST \
+            "${VETTER_API_BASE%/}/environments/${VETTER_ENV_ID}/validate" \
+            -H "Authorization: Bearer ${VETTER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$payload")
+          echo "$resp" | jq .
+          run_id=$(echo "$resp" | jq -r .run_id)
+          if [ -z "$run_id" ] || [ "$run_id" = "null" ]; then
+            echo "no run_id in response: $resp" >&2
+            exit 1
+          fi
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Poll for verdict
+        id: verdict
+        env:
+          VETTER_API_BASE: ${{ vars.VETTER_API_BASE }}
+          VETTER_ENV_ID:   ${{ vars.VETTER_ENV_ID }}
+          VETTER_API_KEY:  ${{ secrets.VETTER_API_KEY }}
+          RUN_ID: ${{ steps.vet.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 80); do
+            resp=$(curl -fsSL \
+              "${VETTER_API_BASE%/}/environments/${VETTER_ENV_ID}/runs/${RUN_ID}" \
+              -H "Authorization: Bearer ${VETTER_API_KEY}")
+            status=$(echo "$resp" | jq -r .status)
+            echo "[$i] status=$status"
+            if [ "$status" = "completed" ]; then
+              echo "$resp" > /tmp/verdict.json
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "timed out waiting for verdict" >&2
+          exit 1
+
+      - name: Post PR comment
+        if: always() && hashFiles('/tmp/verdict.json') != ''
+        uses: actions/github-script@v7
+        env:
+          VETTER_API_BASE: ${{ vars.VETTER_API_BASE }}
+        with:
+          script: |
+            const fs = require('fs');
+            const v = JSON.parse(fs.readFileSync('/tmp/verdict.json', 'utf8'));
+            const r = v.result || {};
+            const status = (r.status || 'unknown').toUpperCase();
+            const icon = r.status === 'pass' ? '✅' : r.status === 'fail' ? '❌' : '❓';
+            const reportImg = v.id
+              ? `![report](${process.env.VETTER_API_BASE.replace(/\/$/, '')}/reports/${v.id})`
+              : '';
+            const body = [
+              `## ${icon} Vetter: ${status}`,
+              '',
+              r.reason || '_no reason provided_',
+              '',
+              reportImg,
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
