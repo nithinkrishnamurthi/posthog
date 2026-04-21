@@ -1220,6 +1220,52 @@ jobs:
                   CLICKHOUSE_SERVER_IMAGE: ${{ matrix.clickhouse-server-image || needs.get_clickhouse_versions.outputs.oldest_supported_image }}
               run: bin/ci-wait-for-docker wait
 
+            # CI speedup: pre-populate test DB with master's migrated schema so Django's
+            # --reuse-db skips ~230s of migrations per shard. Still runs `migrate` after
+            # restore to apply any PR-only migrations AND to fire post_migrate signals
+            # (which create ContentTypes/Permissions/Sites not captured in schema dump).
+            - name: Download migrated schema from master
+              id: download-schema
+              if: ${{ needs.changes.outputs.backend == 'true' && matrix.segment == 'Core' && !matrix.compat }}
+              uses: dawidd6/action-download-artifact@20319c5641d495c8a52e688b7dc5fada6c3a9fbc # v8
+              with:
+                  workflow: ci-backend.yml
+                  branch: master
+                  name: migrated-schema
+                  path: /tmp/master-schema
+                  search_artifacts: true
+                  if_no_artifact_found: warn
+              continue-on-error: true
+
+            - name: Pre-restore test DB schema and fire post_migrate signals
+              if: ${{ steps.download-schema.outcome == 'success' && steps.download-schema.outputs.found_artifact == 'true' }}
+              shell: bash
+              env:
+                  PGPASSWORD: posthog
+              run: |
+                  set -e
+                  if [ ! -f /tmp/master-schema/schema.sql.gz ]; then
+                      echo "::warning::schema.sql.gz missing — skipping (Django will run migrations)"
+                      exit 0
+                  fi
+                  DB_HOST=localhost
+                  DB_PORT=5432
+                  # Pre-create test_posthog with master's schema
+                  psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d postgres \
+                    -c "DROP DATABASE IF EXISTS test_posthog;" \
+                    -c "CREATE DATABASE test_posthog OWNER posthog;"
+                  gunzip -c /tmp/master-schema/schema.sql.gz | \
+                    psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d test_posthog \
+                    --set ON_ERROR_STOP=0 > /tmp/restore.log 2>&1 || echo "::warning::psql restore had non-fatal errors"
+                  MIGRATION_COUNT=$(psql -h "$DB_HOST" -p "$DB_PORT" -U posthog -d test_posthog -tAc "SELECT count(*) FROM django_migrations;" 2>/dev/null || echo "0")
+                  echo "::notice::Restored schema with $MIGRATION_COUNT migration records"
+                  # Now run Django migrate against the restored DB. With populated django_migrations,
+                  # Django applies only NEW migrations (PR-only) and fires post_migrate signals
+                  # which create ContentTypes/Permissions/Sites needed by tests.
+                  DJANGO_SETTINGS_MODULE=posthog.settings TEST=1 DATABASE_URL="postgres://posthog:posthog@localhost:5432/test_posthog" \
+                    python manage.py migrate --noinput 2>&1 | tail -20 || echo "::warning::migrate had issues — conftest will retry"
+                  echo "::notice::Schema restore + post_migrate complete"
+
             - name: Determine if --snapshot-update should be on
               # UPDATE mode: human commits - update snapshots
               # CHECK mode: bot commits (after snapshot update) - verify snapshots match exactly
