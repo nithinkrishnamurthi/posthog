@@ -3,6 +3,12 @@ import { z } from 'zod'
 
 import type { Schemas } from '@/api/generated'
 import {
+    InsightVariablesCreateBody,
+    InsightVariablesDestroyParams,
+    InsightVariablesListQueryParams,
+    InsightVariablesPartialUpdateBody,
+    InsightVariablesPartialUpdateParams,
+    InsightVariablesRetrieveParams,
     WarehouseSavedQueriesCreateBody,
     WarehouseSavedQueriesDestroyParams,
     WarehouseSavedQueriesListQueryParams,
@@ -19,6 +25,119 @@ import {
 } from '@/generated/data_warehouse/api'
 import { withPostHogUrl, type WithPostHogUrl } from '@/tools/tool-utils'
 import type { Context, ToolBase, ZodObjectAny } from '@/tools/types'
+
+const SqlVariablesListSchema = InsightVariablesListQueryParams
+
+const sqlVariablesList = (): ToolBase<
+    typeof SqlVariablesListSchema,
+    WithPostHogUrl<Schemas.PaginatedInsightVariableList>
+> => ({
+    name: 'sql-variables-list',
+    schema: SqlVariablesListSchema,
+    mcpVersion: 1,
+    handler: async (context: Context, params: z.infer<typeof SqlVariablesListSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.PaginatedInsightVariableList>({
+            method: 'GET',
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/insight_variables/`,
+            query: {
+                page: params.page,
+            },
+        })
+        return await withPostHogUrl(context, result, '/sql')
+    },
+})
+
+const SqlVariablesCreateSchema = InsightVariablesCreateBody
+
+const sqlVariablesCreate = (): ToolBase<typeof SqlVariablesCreateSchema, Schemas.InsightVariable> => ({
+    name: 'sql-variables-create',
+    schema: SqlVariablesCreateSchema,
+    handler: async (context: Context, params: z.infer<typeof SqlVariablesCreateSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const body: Record<string, unknown> = {}
+        if (params.name !== undefined) {
+            body['name'] = params.name
+        }
+        if (params.type !== undefined) {
+            body['type'] = params.type
+        }
+        if (params.default_value !== undefined) {
+            body['default_value'] = params.default_value
+        }
+        if (params.values !== undefined) {
+            body['values'] = params.values
+        }
+        const result = await context.api.request<Schemas.InsightVariable>({
+            method: 'POST',
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/insight_variables/`,
+            body,
+        })
+        return result
+    },
+})
+
+const SqlVariablesGetSchema = InsightVariablesRetrieveParams.omit({ project_id: true })
+
+const sqlVariablesGet = (): ToolBase<typeof SqlVariablesGetSchema, Schemas.InsightVariable> => ({
+    name: 'sql-variables-get',
+    schema: SqlVariablesGetSchema,
+    mcpVersion: 1,
+    handler: async (context: Context, params: z.infer<typeof SqlVariablesGetSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.InsightVariable>({
+            method: 'GET',
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/insight_variables/${encodeURIComponent(String(params.id))}/`,
+        })
+        return result
+    },
+})
+
+const SqlVariablesUpdateSchema = InsightVariablesPartialUpdateParams.omit({ project_id: true }).extend(
+    InsightVariablesPartialUpdateBody.shape
+)
+
+const sqlVariablesUpdate = (): ToolBase<typeof SqlVariablesUpdateSchema, Schemas.InsightVariable> => ({
+    name: 'sql-variables-update',
+    schema: SqlVariablesUpdateSchema,
+    handler: async (context: Context, params: z.infer<typeof SqlVariablesUpdateSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const body: Record<string, unknown> = {}
+        if (params.name !== undefined) {
+            body['name'] = params.name
+        }
+        if (params.type !== undefined) {
+            body['type'] = params.type
+        }
+        if (params.default_value !== undefined) {
+            body['default_value'] = params.default_value
+        }
+        if (params.values !== undefined) {
+            body['values'] = params.values
+        }
+        const result = await context.api.request<Schemas.InsightVariable>({
+            method: 'PATCH',
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/insight_variables/${encodeURIComponent(String(params.id))}/`,
+            body,
+        })
+        return result
+    },
+})
+
+const SqlVariablesDeleteSchema = InsightVariablesDestroyParams.omit({ project_id: true })
+
+const sqlVariablesDelete = (): ToolBase<typeof SqlVariablesDeleteSchema, unknown> => ({
+    name: 'sql-variables-delete',
+    schema: SqlVariablesDeleteSchema,
+    handler: async (context: Context, params: z.infer<typeof SqlVariablesDeleteSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<unknown>({
+            method: 'DELETE',
+            path: `/api/projects/${encodeURIComponent(String(projectId))}/insight_variables/${encodeURIComponent(String(params.id))}/`,
+        })
+        return result
+    },
+})
 
 const ViewListSchema = WarehouseSavedQueriesListQueryParams
 
@@ -319,6 +438,11 @@ const viewRunHistory = (): ToolBase<typeof ViewRunHistorySchema, WithPostHogUrl<
 })
 
 export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
+    'sql-variables-list': sqlVariablesList,
+    'sql-variables-create': sqlVariablesCreate,
+    'sql-variables-get': sqlVariablesGet,
+    'sql-variables-update': sqlVariablesUpdate,
+    'sql-variables-delete': sqlVariablesDelete,
     'view-list': viewList,
     'view-create': viewCreate,
     'view-get': viewGet,
