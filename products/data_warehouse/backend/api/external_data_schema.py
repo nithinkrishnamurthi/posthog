@@ -54,6 +54,9 @@ from products.data_warehouse.backend.types import ExternalDataSourceType
 logger = structlog.get_logger(__name__)
 
 
+_NOT_PROVIDED = object()
+
+
 class ExternalDataSchemaSerializer(serializers.ModelSerializer):
     table = serializers.SerializerMethodField(read_only=True)
     incremental = serializers.SerializerMethodField(read_only=True)
@@ -168,19 +171,17 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         callback()
 
     def update(self, instance: ExternalDataSchema, validated_data: dict[str, Any]) -> ExternalDataSchema:
-        sync_type = validated_data.pop("sync_type", None)
-        sync_frequency = validated_data.pop("sync_frequency", None)
-        sync_time_of_day = validated_data.pop("sync_time_of_day", None)
-        sync_time_of_day_in_payload = "sync_time_of_day" in (
-            self.initial_data if isinstance(self.initial_data, dict) else {}
-        )
-        incremental_field = validated_data.pop("incremental_field", None)
-        incremental_field_type = validated_data.pop("incremental_field_type", None)
-        primary_key_columns = validated_data.pop("primary_key_columns", None)
-        cdc_table_mode = validated_data.pop("cdc_table_mode", None)
+        sync_type = validated_data.pop("sync_type", _NOT_PROVIDED)
+        sync_frequency = validated_data.pop("sync_frequency", _NOT_PROVIDED)
+        sync_time_of_day = validated_data.pop("sync_time_of_day", _NOT_PROVIDED)
+        incremental_field = validated_data.pop("incremental_field", _NOT_PROVIDED)
+        incremental_field_type = validated_data.pop("incremental_field_type", _NOT_PROVIDED)
+        primary_key_columns = validated_data.pop("primary_key_columns", _NOT_PROVIDED)
+        cdc_table_mode = validated_data.pop("cdc_table_mode", _NOT_PROVIDED)
 
         if (
-            sync_type is not None
+            sync_type is not _NOT_PROVIDED
+            and sync_type is not None
             and sync_type != ExternalDataSchema.SyncType.FULL_REFRESH
             and sync_type != ExternalDataSchema.SyncType.INCREMENTAL
             and sync_type != ExternalDataSchema.SyncType.APPEND
@@ -196,7 +197,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
             if not is_cdc_enabled_for_team(team):
                 raise ValidationError("CDC is not enabled for this team")
 
-        if sync_type is not None:
+        if sync_type is not _NOT_PROVIDED:
             validated_data["sync_type"] = sync_type
 
         trigger_refresh = False
@@ -207,7 +208,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         ):
             payload = instance.sync_type_config
 
-            if primary_key_columns is not None:
+            if primary_key_columns is not _NOT_PROVIDED:
                 old_pk = instance.sync_type_config.get("primary_key_columns")
                 if (
                     sync_type == ExternalDataSchema.SyncType.INCREMENTAL
@@ -227,9 +228,9 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
                     or payload.get("incremental_field_last_value") is None
                 )
 
-            if incremental_field is not None:
+            if incremental_field is not _NOT_PROVIDED:
                 payload["incremental_field"] = incremental_field
-            if incremental_field_type is not None:
+            if incremental_field_type is not _NOT_PROVIDED:
                 payload["incremental_field_type"] = incremental_field_type
 
             if incremental_field_changed:
@@ -264,7 +265,7 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         was_sync_time_of_day_updated = False
         source = instance.source
 
-        if sync_frequency:
+        if sync_frequency is not _NOT_PROVIDED and sync_frequency:
             sync_frequency_interval = sync_frequency_to_sync_frequency_interval(sync_frequency)
 
             if sync_frequency_interval != instance.sync_frequency_interval:
@@ -272,23 +273,28 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
                 validated_data["sync_frequency_interval"] = sync_frequency_interval
                 instance.sync_frequency_interval = sync_frequency_interval
 
-        if sync_time_of_day is not None:
-            try:
-                new_time = dt.datetime.strptime(str(sync_time_of_day), "%H:%M:%S").time()
-            except ValueError:
-                raise ValidationError("Invalid sync time of day")
+        if sync_time_of_day is not _NOT_PROVIDED:
+            if sync_time_of_day is not None:
+                try:
+                    new_time = dt.datetime.strptime(str(sync_time_of_day), "%H:%M:%S").time()
+                except ValueError:
+                    raise ValidationError("Invalid sync time of day")
 
-            if new_time != instance.sync_time_of_day:
-                was_sync_time_of_day_updated = True
-                validated_data["sync_time_of_day"] = sync_time_of_day
-                instance.sync_time_of_day = sync_time_of_day
-        else:
-            if sync_time_of_day_in_payload and sync_time_of_day != instance.sync_time_of_day:
+                if new_time != instance.sync_time_of_day:
+                    was_sync_time_of_day_updated = True
+                    validated_data["sync_time_of_day"] = sync_time_of_day
+                    instance.sync_time_of_day = sync_time_of_day
+            elif sync_time_of_day != instance.sync_time_of_day:
                 was_sync_time_of_day_updated = True
                 validated_data["sync_time_of_day"] = None
                 instance.sync_time_of_day = None
 
-        if source.supports_scheduled_sync and should_sync is True and sync_type is None and instance.sync_type is None:
+        if (
+            source.supports_scheduled_sync
+            and should_sync is True
+            and sync_type is _NOT_PROVIDED
+            and instance.sync_type is None
+        ):
             raise ValidationError("Sync type must be set up first before enabling schema")
 
         # When re-enabling a webhook schema, force a full refresh to avoid missing data
