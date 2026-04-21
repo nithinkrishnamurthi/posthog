@@ -29,7 +29,7 @@ from ee.hogai.eval.sandboxed.product_analytics.scorers import (
     FunnelSchemaAlignment,
     FunnelTimeRangeRelevancy,
 )
-from ee.hogai.eval.sandboxed.scorers import ExitCodeZero, NoToolCall
+from ee.hogai.eval.sandboxed.scorers import ExitCodeZero, NoToolCall, RequiredToolCall
 
 
 def _funnel_case(
@@ -566,6 +566,7 @@ async def eval_funnel(sandboxed_demo_data, pytestconfig, posthog_client):
         scorers=[
             ExitCodeZero(),
             NoToolCall(forbidden=INSIGHT_WRITE_TOOLS, name="no_persistent_insight_save"),
+            RequiredToolCall(required={"read-data-schema"}, name="verified_event_exists"),
             FunnelSchemaAlignment(),
             FunnelTimeRangeRelevancy(),
         ],
