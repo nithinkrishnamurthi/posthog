@@ -1102,7 +1102,7 @@ jobs:
                   WAIT_FOR_DOCKER_LAUNCH_RETRY_DELAY: 5
               run: |
                   cp posthog/user_scripts/latest_user_defined_function.xml docker/clickhouse/user_defined_function.xml
-                  bin/ci-wait-for-docker launch --background --down
+                  bin/ci-wait-for-docker launch --background --down-all-profiles
 
             - name: Add service hostnames to /etc/hosts
               shell: bash
