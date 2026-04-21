@@ -5493,6 +5493,7 @@ export interface DataWarehouseTable {
     external_data_source?: ExternalDataSource
     external_schema?: SimpleExternalDataSourceSchema
     options?: { csv_allow_double_quotes?: boolean | null }
+    user_access_level?: AccessControlLevel
 }
 
 export type DataWarehouseTableTypes = 'CSV' | 'Parquet' | 'JSON' | 'CSVWithNames'
@@ -5581,6 +5582,7 @@ export interface DataWarehouseSavedQuery {
     origin?: DataWarehouseSavedQueryOrigin
     is_test?: boolean
     expires_at?: string
+    user_access_level?: AccessControlLevel
 }
 
 export interface DataWarehouseSavedQueryFolder {
