@@ -69,7 +69,6 @@ class TeamScopedMetadataRead(GuestRule):
             organization_membership__user=user,
             organization_membership__is_guest=True,
             team_id=team_id,
-            is_pending=False,
         ).exists()
 
 
@@ -78,7 +77,6 @@ def _guest_grants_qs(user: User, team_id: int):
         organization_membership__user=user,
         organization_membership__is_guest=True,
         team_id=team_id,
-        is_pending=False,
     )
 
 

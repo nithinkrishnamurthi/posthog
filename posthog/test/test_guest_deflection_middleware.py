@@ -55,7 +55,6 @@ class TestGuestDeflectionMiddleware(APIBaseTest):
             team=self.team,
             resource=resource,
             resource_id=resource_id,
-            is_pending=False,
         )
 
     def test_non_guest_user_is_never_deflected(self) -> None:
