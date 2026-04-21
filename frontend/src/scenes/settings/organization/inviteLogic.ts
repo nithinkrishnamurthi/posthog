@@ -13,6 +13,15 @@ import { AccessControlLevel, OrganizationInviteType } from '~/types'
 
 import type { inviteLogicType } from './inviteLogicType'
 
+/** Grant the guest invite will materialize on acceptance. Mirrors `GuestResourceGrant`. */
+export interface GuestInviteGrant {
+    team_id: number
+    resource: 'dashboard' | 'insight' | 'notebook'
+    resource_id: string
+    /** Display label for the UI only; not sent to the server. */
+    label?: string
+}
+
 /** State of a single invite row (with input data) in bulk invite creation. */
 export interface InviteRowState {
     target_email: string
@@ -52,6 +61,11 @@ export const inviteLogic = kea<inviteLogicType>([
             level,
         }),
         removeProjectAccess: (inviteIndex: number, projectId: number) => ({ inviteIndex, projectId }),
+        setIsGuestInvite: (isGuest: boolean) => ({ isGuest }),
+        addGuestGrant: (grant: GuestInviteGrant) => ({ grant }),
+        removeGuestGrant: (index: number) => ({ index }),
+        setBypassSsoEnforcement: (bypass: boolean) => ({ bypass }),
+        resetGuestState: true,
     }),
     loaders(({ values }) => ({
         invitedTeamMembersInternal: [
@@ -60,6 +74,28 @@ export const inviteLogic = kea<inviteLogicType>([
                 inviteTeamMembers: async () => {
                     if (!values.canSubmit) {
                         return []
+                    }
+
+                    if (values.isGuestInvite) {
+                        // Guest invites are one-at-a-time; take the first filled row.
+                        const firstInvite = values.invitesToSend.find((invite) => invite.target_email)
+                        if (!firstInvite) {
+                            return []
+                        }
+                        const guestPayload = {
+                            target_email: firstInvite.target_email,
+                            first_name: firstInvite.first_name,
+                            guest_resources: values.guestGrants.map((g) => ({
+                                team_id: g.team_id,
+                                resource: g.resource,
+                                resource_id: g.resource_id,
+                            })),
+                            bypass_sso: values.bypassSsoEnforcement,
+                        }
+                        return await api.create<OrganizationInviteType[]>(
+                            `api/organizations/${organizationLogic.values.currentOrganizationId}/invites/bulk/`,
+                            [guestPayload]
+                        )
                     }
 
                     const payload: Pick<
@@ -189,6 +225,31 @@ export const inviteLogic = kea<inviteLogicType>([
                 setIsInviteConfirmed: (_, { inviteConfirmed }) => inviteConfirmed,
             },
         ],
+        isGuestInvite: [
+            false,
+            {
+                setIsGuestInvite: (_, { isGuest }) => isGuest,
+                resetGuestState: () => false,
+                inviteTeamMembersSuccess: () => false,
+            },
+        ],
+        guestGrants: [
+            [] as GuestInviteGrant[],
+            {
+                addGuestGrant: (state, { grant }) => [...state, grant],
+                removeGuestGrant: (state, { index }) => state.filter((_, i) => i !== index),
+                resetGuestState: () => [],
+                inviteTeamMembersSuccess: () => [],
+            },
+        ],
+        bypassSsoEnforcement: [
+            false,
+            {
+                setBypassSsoEnforcement: (_, { bypass }) => bypass,
+                resetGuestState: () => false,
+                inviteTeamMembersSuccess: () => false,
+            },
+        ],
     })),
     selectors({
         inviteContainsOwnerLevel: [
@@ -198,8 +259,24 @@ export const inviteLogic = kea<inviteLogicType>([
             },
         ],
         canSubmit: [
-            (selectors) => [selectors.invitesToSend, selectors.inviteContainsOwnerLevel, selectors.isInviteConfirmed],
-            (invites: InviteRowState[], inviteContainsOwnerLevel: boolean, isInviteConfirmed: boolean) => {
+            (selectors) => [
+                selectors.invitesToSend,
+                selectors.inviteContainsOwnerLevel,
+                selectors.isInviteConfirmed,
+                selectors.isGuestInvite,
+                selectors.guestGrants,
+            ],
+            (
+                invites: InviteRowState[],
+                inviteContainsOwnerLevel: boolean,
+                isInviteConfirmed: boolean,
+                isGuestInvite: boolean,
+                guestGrants: GuestInviteGrant[]
+            ) => {
+                const validEmails = invites.filter(({ target_email, isValid }) => !!target_email && isValid)
+                if (isGuestInvite) {
+                    return validEmails.length === 1 && guestGrants.length > 0
+                }
                 const ownerLevelConfirmed = inviteContainsOwnerLevel ? isInviteConfirmed : true
                 return (
                     invites.filter(({ target_email }) => !!target_email).length > 0 &&
@@ -230,6 +307,7 @@ export const inviteLogic = kea<inviteLogicType>([
 
             organizationLogic.actions.loadCurrentOrganization()
             actions.loadInvites()
+            actions.resetGuestState()
 
             if (values.preflight?.email_service_available) {
                 actions.hideInviteModal()
