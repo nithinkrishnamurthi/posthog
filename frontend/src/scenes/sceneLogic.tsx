@@ -50,6 +50,27 @@ import { inviteLogic } from './settings/organization/inviteLogic'
 import { teamLogic } from './teamLogic'
 import { userLogic } from './userLogic'
 
+/**
+ * Scenes a user flagged as a guest is allowed to render directly.
+ *
+ * Keep this list tight — the backend middleware will 404 any API call we make
+ * from a non-allowlisted scene anyway, but letting the scene mount at all
+ * wastes time and exposes chrome the guest cannot use. Additions here should
+ * correspond to resource types the guest-mode middleware (see
+ * `posthog/middleware_guest.py`) has a rule for.
+ */
+export const GUEST_ALLOWED_SCENES: ReadonlySet<Scene> = new Set<Scene>([
+    Scene.Guest,
+    Scene.Dashboard,
+    Scene.Insight,
+    Scene.Notebook,
+    Scene.Login,
+    Scene.Error404,
+    Scene.ErrorAccessDenied,
+    Scene.ErrorNetwork,
+    Scene.ErrorProjectUnavailable,
+])
+
 const TAB_STATE_KEY = 'scene-tabs-state'
 const PINNED_TAB_STATE_KEY = 'scene-tabs-pinned-state'
 
@@ -1140,6 +1161,14 @@ export const sceneLogic = kea<sceneLogicType>([
             const sceneConfig = sceneConfigurations[sceneId] || {}
             const { user } = userLogic.values
             const { preflight } = preflightLogic.values
+
+            // Guests can only open scenes on the allowlist. Deflect everything else to /guest —
+            // not because the scene would render anything useful (its API calls would 404 via
+            // the backend middleware) but because the chrome and nav panel don't belong.
+            if (user?.is_guest_in_current_project && !GUEST_ALLOWED_SCENES.has(sceneId as Scene)) {
+                router.actions.replace(urls.guest())
+                return
+            }
 
             if (sceneId === Scene.Signup && preflight && !preflight.can_create_org) {
                 // If user is on an already initiated self-hosted instance, redirect away from signup

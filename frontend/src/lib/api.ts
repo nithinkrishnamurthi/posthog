@@ -1978,6 +1978,47 @@ const normalizeUrl = (url: string): string => {
     return url
 }
 
+/**
+ * Resolve the current scene's primary resource identity from the browser URL.
+ *
+ * Used by the scene-context request interceptor to stamp
+ * `X-PostHog-Scene-Resource` on every outgoing API call. The guest-access
+ * middleware on the backend consults this header to decide whether a generic
+ * endpoint (e.g. a query or a property-definitions lookup) is being used in
+ * the service of a resource the guest has been granted.
+ *
+ * Returns `null` for any URL that isn't a dashboard/insight/notebook view.
+ */
+export function resolveSceneResource(pathname: string): string | null {
+    // /project/<id>/dashboard/<numeric-id>
+    const dashboardMatch = /\/project\/\d+\/dashboard\/(\d+)(?:\/|$|\?|#)/.exec(pathname)
+    if (dashboardMatch) {
+        return `dashboard:${dashboardMatch[1]}`
+    }
+
+    // /project/<id>/insights/<short_id> — exclude /insights/new and /insights/new/...
+    const insightMatch = /\/project\/\d+\/insights\/([A-Za-z0-9_-]+)(?:\/|$|\?|#)/.exec(pathname)
+    if (insightMatch && insightMatch[1] !== 'new') {
+        return `insight:${insightMatch[1]}`
+    }
+
+    // /project/<id>/notebooks/<short_id> — exclude /notebooks/new
+    const notebookMatch = /\/project\/\d+\/notebooks\/([A-Za-z0-9_-]+)(?:\/|$|\?|#)/.exec(pathname)
+    if (notebookMatch && notebookMatch[1] !== 'new') {
+        return `notebook:${notebookMatch[1]}`
+    }
+
+    return null
+}
+
+function sceneResourceHeader(): Record<string, string> {
+    if (typeof window === 'undefined' || !window.location) {
+        return {}
+    }
+    const resource = resolveSceneResource(window.location.pathname)
+    return resource ? { 'X-PostHog-Scene-Resource': resource } : {}
+}
+
 const prepareUrl = (url: string): string => {
     let output = normalizeUrl(url)
 
@@ -6080,6 +6121,7 @@ const api = {
                     ...objectClean(options?.headers ?? {}),
                     ...(getSessionId() ? { 'X-POSTHOG-SESSION-ID': getSessionId() } : {}),
                     ...(getDistinctId() ? { 'X-POSTHOG-DISTINCT-ID': getDistinctId() } : {}),
+                    ...sceneResourceHeader(),
                     ...authHeaders,
                 },
             })
@@ -6104,6 +6146,7 @@ const api = {
                     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
                     'X-CSRFToken': getCookie(CSRF_COOKIE_NAME) || '',
                     ...(getSessionId() ? { 'X-POSTHOG-SESSION-ID': getSessionId() } : {}),
+                    ...sceneResourceHeader(),
                 },
                 body: isFormData ? data : JSON.stringify(data),
                 signal: options?.signal,
@@ -6139,6 +6182,7 @@ const api = {
                     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
                     'X-CSRFToken': getCookie(CSRF_COOKIE_NAME) || '',
                     ...(getSessionId() ? { 'X-POSTHOG-SESSION-ID': getSessionId() } : {}),
+                    ...sceneResourceHeader(),
                 },
                 body: data ? (isFormData ? data : JSON.stringify(data)) : undefined,
                 signal: options?.signal,
@@ -6156,6 +6200,7 @@ const api = {
                     'Content-Type': 'application/x-www-form-urlencoded',
                     'X-CSRFToken': getCookie(CSRF_COOKIE_NAME) || '',
                     ...(getSessionId() ? { 'X-POSTHOG-SESSION-ID': getSessionId() } : {}),
+                    ...sceneResourceHeader(),
                 },
             })
         )

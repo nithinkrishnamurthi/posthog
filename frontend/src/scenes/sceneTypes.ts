@@ -66,6 +66,7 @@ export enum Scene {
     FeatureFlag = 'FeatureFlag',
     FeatureFlags = 'FeatureFlags',
     Game368 = 'Game368',
+    Guest = 'Guest',
     Group = 'Group',
     Groups = 'Groups',
     GroupsNew = 'GroupsNew',

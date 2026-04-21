@@ -315,6 +315,14 @@ export interface SceneDashboardChoice {
     dashboard: number | DashboardBasicType
 }
 
+export interface GuestGrant {
+    team_id: number
+    team_name?: string
+    resource: 'dashboard' | 'insight' | 'notebook'
+    resource_id: string
+    resource_name?: string
+}
+
 export type UserTheme = 'light' | 'dark' | 'system'
 export type UserShortcutPosition = 'above' | 'below' | 'hidden'
 
@@ -350,6 +358,8 @@ export interface UserType extends UserBaseType {
     allow_sidebar_suggestions?: boolean
     role_at_organization?: UserRole | null
     passkeys_enabled_for_2fa?: boolean
+    is_guest_in_current_project?: boolean
+    guest_grants?: GuestGrant[]
 }
 
 export type HedgehogColorOptions =

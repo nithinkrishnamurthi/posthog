@@ -116,6 +116,13 @@ export const sceneConfigurations: Record<Scene | string, SceneConfig> = {
         layout: 'plain',
     },
     [Scene.Cohort]: { projectBased: true, name: 'Cohort', defaultDocsPath: '/docs/data/cohorts' },
+    [Scene.Guest]: {
+        projectBased: false,
+        organizationBased: false,
+        name: 'Shared with you',
+        layout: 'plain',
+    },
+
     [Scene.CohortCalculationHistory]: { projectBased: true, name: 'Cohort Calculation History' },
     [Scene.Cohorts]: {
         projectBased: true,
@@ -784,6 +791,7 @@ export const redirects: Record<
 }
 
 export const routes: Record<string, [Scene | string, string]> = {
+    [urls.guest()]: [Scene.Guest, 'guest'],
     [urls.newTab()]: [Scene.NewTab, 'newTab'],
     [urls.dashboards()]: [Scene.Dashboards, 'dashboards'],
     [urls.dashboard(':id')]: [Scene.Dashboard, 'dashboard'],
