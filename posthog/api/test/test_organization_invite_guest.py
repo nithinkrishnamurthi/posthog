@@ -101,7 +101,6 @@ class TestOrganizationInviteGuest(APIBaseTest):
         grant = GuestResourceGrant.objects.get(organization_membership=membership)
         self.assertEqual(grant.resource, "dashboard")
         self.assertEqual(grant.resource_id, str(self.dashboard.pk))
-        self.assertFalse(grant.is_pending)
 
         self.assertTrue(
             AccessControl.objects.filter(

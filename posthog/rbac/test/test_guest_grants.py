@@ -46,7 +46,6 @@ class TestGuestGrants(BaseTest):
 
         self.assertEqual(grant.resource, "dashboard")
         self.assertEqual(grant.resource_id, str(self.dashboard.pk))
-        self.assertFalse(grant.is_pending)
 
         ac = AccessControl.objects.get(
             team=self.team,
@@ -55,23 +54,6 @@ class TestGuestGrants(BaseTest):
             organization_member=self.guest_membership,
         )
         self.assertEqual(ac.access_level, GUEST_VIEWER_ACCESS_LEVEL)
-
-    def test_pending_grant_does_not_create_access_control_row(self) -> None:
-        create_grant(
-            membership=self.guest_membership,
-            team=self.team,
-            resource="dashboard",
-            resource_id=str(self.dashboard.pk),
-            created_by=self.user,
-            is_pending=True,
-        )
-        self.assertFalse(
-            AccessControl.objects.filter(
-                team=self.team,
-                resource="dashboard",
-                resource_id=str(self.dashboard.pk),
-            ).exists()
-        )
 
     def test_delete_grant_removes_access_control_row(self) -> None:
         grant = create_grant(
@@ -142,7 +124,6 @@ class TestGuestGrants(BaseTest):
                 organization_membership=self.guest_membership,
                 resource="dashboard",
                 resource_id=str(self.dashboard.pk),
-                is_pending=False,
             ).exists()
         )
         self.assertTrue(

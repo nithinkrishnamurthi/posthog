@@ -95,46 +95,39 @@ def create_grant(
     resource: str,
     resource_id: str,
     created_by: User,
-    is_pending: bool = False,
 ) -> GuestResourceGrant:
-    """Create a `GuestResourceGrant` plus its mirroring `AccessControl` row.
-
-    Active grants (is_pending=False) always have a mirroring AC row at viewer access.
-    Pending grants skip the AC row — no membership exists yet to scope the AC row to.
-    """
+    """Create a `GuestResourceGrant` plus its mirroring `AccessControl` row at viewer access."""
     if resource not in VALID_RESOURCES:
         raise exceptions.ValidationError(f"Invalid resource: {resource}")
 
     grant = GuestResourceGrant.objects.create(
-        organization_membership=None if is_pending else membership,
+        organization_membership=membership,
         team=team,
         resource=resource,
         resource_id=str(resource_id),
-        is_pending=is_pending,
         created_by=created_by,
     )
 
-    if not is_pending:
-        ac_resource_id = _ac_resource_id(resource, str(resource_id), team.id)
-        if ac_resource_id is not None:
-            AccessControl.objects.get_or_create(
-                team=team,
-                resource=resource,
-                resource_id=ac_resource_id,
-                organization_member=membership,
-                role=None,
-                defaults={"access_level": GUEST_VIEWER_ACCESS_LEVEL, "created_by": created_by},
-            )
-        # Dashboard grants cascade viewer AC to each tile insight at grant time so the
-        # insight scene resolves user_access_level="viewer" naturally. Tiles added later
-        # won't auto-propagate; accept as a v1 limitation.
-        if resource == "dashboard":
-            _cascade_ac_to_dashboard_tiles(
-                team=team,
-                dashboard_id=str(resource_id),
-                membership=membership,
-                created_by=created_by,
-            )
+    ac_resource_id = _ac_resource_id(resource, str(resource_id), team.id)
+    if ac_resource_id is not None:
+        AccessControl.objects.get_or_create(
+            team=team,
+            resource=resource,
+            resource_id=ac_resource_id,
+            organization_member=membership,
+            role=None,
+            defaults={"access_level": GUEST_VIEWER_ACCESS_LEVEL, "created_by": created_by},
+        )
+    # Dashboard grants cascade viewer AC to each tile insight at grant time so the
+    # insight scene resolves user_access_level="viewer" naturally. Tiles added later
+    # won't auto-propagate; accept as a v1 limitation.
+    if resource == "dashboard":
+        _cascade_ac_to_dashboard_tiles(
+            team=team,
+            dashboard_id=str(resource_id),
+            membership=membership,
+            created_by=created_by,
+        )
 
     return grant
 
@@ -181,26 +174,25 @@ def _cascade_ac_to_dashboard_tiles(
 
 @transaction.atomic
 def delete_grant(grant: GuestResourceGrant) -> None:
-    """Delete a grant and the AC row that mirrors it (if any)."""
-    if not grant.is_pending and grant.organization_membership_id is not None:
-        ac_resource_id = _ac_resource_id(grant.resource, grant.resource_id, grant.team_id)
-        if ac_resource_id is not None:
-            AccessControl.objects.filter(
-                team=grant.team,
-                resource=grant.resource,
-                resource_id=ac_resource_id,
-                organization_member_id=grant.organization_membership_id,
-            ).delete()
-        if grant.resource == "dashboard" and grant.resource_id.isdigit():
-            tile_insight_pks = DashboardTile.objects.filter(
-                dashboard_id=int(grant.resource_id), insight__isnull=False
-            ).values_list("insight_id", flat=True)
-            AccessControl.objects.filter(
-                team=grant.team,
-                resource="insight",
-                resource_id__in=[str(pk) for pk in tile_insight_pks if pk is not None],
-                organization_member_id=grant.organization_membership_id,
-            ).delete()
+    """Delete a grant and the AC rows that mirror it."""
+    ac_resource_id = _ac_resource_id(grant.resource, grant.resource_id, grant.team_id)
+    if ac_resource_id is not None:
+        AccessControl.objects.filter(
+            team=grant.team,
+            resource=grant.resource,
+            resource_id=ac_resource_id,
+            organization_member_id=grant.organization_membership_id,
+        ).delete()
+    if grant.resource == "dashboard" and grant.resource_id.isdigit():
+        tile_insight_pks = DashboardTile.objects.filter(
+            dashboard_id=int(grant.resource_id), insight__isnull=False
+        ).values_list("insight_id", flat=True)
+        AccessControl.objects.filter(
+            team=grant.team,
+            resource="insight",
+            resource_id__in=[str(pk) for pk in tile_insight_pks if pk is not None],
+            organization_member_id=grant.organization_membership_id,
+        ).delete()
     grant.delete()
 
 
@@ -220,7 +212,6 @@ def apply_invite_grants(
                 resource=entry["resource"],
                 resource_id=str(entry["resource_id"]),
                 created_by=invite.created_by,
-                is_pending=False,
             )
         )
     return created

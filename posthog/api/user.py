@@ -275,7 +275,6 @@ class UserSerializer(serializers.ModelSerializer):
             return []
         grants = GuestResourceGrant.objects.filter(
             organization_membership=membership,
-            is_pending=False,
         ).select_related("team")
         return [
             {
