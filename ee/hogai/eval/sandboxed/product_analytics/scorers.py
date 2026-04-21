@@ -20,7 +20,7 @@ QUERY_FUNNEL_TOOL_NAME = "query-funnel"
 
 BINARY_CHOICE_SCORES = {"yes": 1.0, "no": 0.0}
 
-_JUDGE_MODEL = "gpt-4.1"
+_JUDGE_MODEL = "gpt-5.4"
 
 # PostHog MCP tools that persist saved-insight state. The sandbox is disposable
 # but these tools still hit real rows, so any successful call is a bug in the
@@ -33,6 +33,42 @@ INSIGHT_WRITE_TOOLS = frozenset(
         "insight-destroy",
     }
 )
+
+
+class _JudgedScorer(LLMClassifier):
+    """Shared wiring for product-analytics LLM judges.
+
+    Subclasses implement ``_prepare(output, expected)`` returning either a
+    ``Score`` to short-circuit, or a dict with ``output``/``expected`` to
+    forward to the LLM judge.
+
+    Both the short-circuit paths and judge-call exceptions map to
+    ``score=0.0`` rather than ``score=None`` — Braintrust treats ``None`` as
+    "skipped" and drops it from the aggregate, which silently hides broken
+    judges and missing query inputs. We want those to surface as failing
+    scores instead.
+    """
+
+    async def _run_eval_async(self, output, expected=None, **kwargs):
+        prepared = self._prepare(output, expected)
+        if isinstance(prepared, Score):
+            return prepared
+        try:
+            return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
+        except Exception as exc:
+            return Score(name=self._name(), score=0.0, metadata={"reason": f"judge error: {exc}"})
+
+    def _run_eval_sync(self, output, expected=None, **kwargs):
+        prepared = self._prepare(output, expected)
+        if isinstance(prepared, Score):
+            return prepared
+        try:
+            return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
+        except Exception as exc:
+            return Score(name=self._name(), score=0.0, metadata={"reason": f"judge error: {exc}"})
+
+    def _prepare(self, output, expected) -> dict[str, Any] | Score:
+        raise NotImplementedError
 
 
 def extract_last_query_retention_input(output: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -58,40 +94,22 @@ def extract_last_query_retention_input(output: dict[str, Any] | None) -> dict[st
     return last_input
 
 
-class RetentionSchemaAlignment(LLMClassifier):
+class RetentionSchemaAlignment(_JudgedScorer):
     """Binary yes/no: does the retention query the agent ran match the expected one?"""
-
-    async def _run_eval_async(self, output, expected=None, **kwargs):
-        return await self._judge_async(output, expected, **kwargs)
-
-    def _run_eval_sync(self, output, expected=None, **kwargs):
-        return self._judge_sync(output, expected, **kwargs)
-
-    async def _judge_async(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
-
-    def _judge_sync(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
 
     def _prepare(self, output, expected) -> dict[str, Any] | Score:
         actual = extract_last_query_retention_input(output)
         if actual is None:
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "Agent never ran query-retention successfully"},
             )
         expected_query = (expected or {}).get("retention_query") if isinstance(expected, dict) else None
         if not isinstance(expected_query, dict):
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "No expected.retention_query provided"},
             )
         return {
@@ -128,38 +146,20 @@ Does the actual retention query match the expected retention query on the materi
 """.strip(),
             choice_scores=BINARY_CHOICE_SCORES,
             model=_JUDGE_MODEL,
-            max_tokens=512,
+            max_completion_tokens=512,
             **kwargs,
         )
 
 
-class RetentionTimeRangeRelevancy(LLMClassifier):
+class RetentionTimeRangeRelevancy(_JudgedScorer):
     """Binary yes/no: is the retention query's time range / period consistent with the user prompt?"""
-
-    async def _run_eval_async(self, output, expected=None, **kwargs):
-        return await self._judge_async(output, expected, **kwargs)
-
-    def _run_eval_sync(self, output, expected=None, **kwargs):
-        return self._judge_sync(output, expected, **kwargs)
-
-    async def _judge_async(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
-
-    def _judge_sync(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
 
     def _prepare(self, output, expected) -> dict[str, Any] | Score:
         actual = extract_last_query_retention_input(output)
         if actual is None:
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "Agent never ran query-retention successfully"},
             )
         prompt = _extract_user_prompt(output)
@@ -196,7 +196,7 @@ Is the time range / period in the actual query consistent with the user's prompt
 """.strip(),
             choice_scores=BINARY_CHOICE_SCORES,
             model=_JUDGE_MODEL,
-            max_tokens=512,
+            max_completion_tokens=512,
             **kwargs,
         )
 
@@ -224,40 +224,22 @@ def extract_last_query_trends_input(output: dict[str, Any] | None) -> dict[str, 
     return last_input
 
 
-class TrendsSchemaAlignment(LLMClassifier):
+class TrendsSchemaAlignment(_JudgedScorer):
     """Binary yes/no: does the trends query the agent ran match the expected one?"""
-
-    async def _run_eval_async(self, output, expected=None, **kwargs):
-        return await self._judge_async(output, expected, **kwargs)
-
-    def _run_eval_sync(self, output, expected=None, **kwargs):
-        return self._judge_sync(output, expected, **kwargs)
-
-    async def _judge_async(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
-
-    def _judge_sync(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
 
     def _prepare(self, output, expected) -> dict[str, Any] | Score:
         actual = extract_last_query_trends_input(output)
         if actual is None:
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "Agent never ran query-trends successfully"},
             )
         expected_query = (expected or {}).get("trends_query") if isinstance(expected, dict) else None
         if not isinstance(expected_query, dict):
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "No expected.trends_query provided"},
             )
         return {
@@ -299,38 +281,20 @@ Does the actual trends query match the expected trends query on the material fie
 """.strip(),
             choice_scores=BINARY_CHOICE_SCORES,
             model=_JUDGE_MODEL,
-            max_tokens=512,
+            max_completion_tokens=512,
             **kwargs,
         )
 
 
-class TrendsTimeRangeRelevancy(LLMClassifier):
+class TrendsTimeRangeRelevancy(_JudgedScorer):
     """Binary yes/no: is the trends query's time range / interval consistent with the user prompt?"""
-
-    async def _run_eval_async(self, output, expected=None, **kwargs):
-        return await self._judge_async(output, expected, **kwargs)
-
-    def _run_eval_sync(self, output, expected=None, **kwargs):
-        return self._judge_sync(output, expected, **kwargs)
-
-    async def _judge_async(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
-
-    def _judge_sync(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
 
     def _prepare(self, output, expected) -> dict[str, Any] | Score:
         actual = extract_last_query_trends_input(output)
         if actual is None:
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "Agent never ran query-trends successfully"},
             )
         prompt = _extract_user_prompt(output)
@@ -366,7 +330,7 @@ Is the time range / interval in the actual query consistent with the user's prom
 """.strip(),
             choice_scores=BINARY_CHOICE_SCORES,
             model=_JUDGE_MODEL,
-            max_tokens=512,
+            max_completion_tokens=512,
             **kwargs,
         )
 
@@ -426,40 +390,22 @@ def extract_last_query_funnel_input(output: dict[str, Any] | None) -> dict[str, 
     return last_input
 
 
-class FunnelSchemaAlignment(LLMClassifier):
+class FunnelSchemaAlignment(_JudgedScorer):
     """Binary yes/no: does the funnel query the agent ran match the expected one?"""
-
-    async def _run_eval_async(self, output, expected=None, **kwargs):
-        return await self._judge_async(output, expected, **kwargs)
-
-    def _run_eval_sync(self, output, expected=None, **kwargs):
-        return self._judge_sync(output, expected, **kwargs)
-
-    async def _judge_async(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
-
-    def _judge_sync(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
 
     def _prepare(self, output, expected) -> dict[str, Any] | Score:
         actual = extract_last_query_funnel_input(output)
         if actual is None:
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "Agent never ran query-funnel successfully"},
             )
         expected_query = (expected or {}).get("funnel_query") if isinstance(expected, dict) else None
         if not isinstance(expected_query, dict):
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "No expected.funnel_query provided"},
             )
         return {
@@ -505,38 +451,20 @@ Does the actual funnel query match the expected funnel query on the material fie
 """.strip(),
             choice_scores=BINARY_CHOICE_SCORES,
             model=_JUDGE_MODEL,
-            max_tokens=512,
+            max_completion_tokens=512,
             **kwargs,
         )
 
 
-class FunnelTimeRangeRelevancy(LLMClassifier):
+class FunnelTimeRangeRelevancy(_JudgedScorer):
     """Binary yes/no: is the funnel query's time range + conversion window consistent with the user prompt?"""
-
-    async def _run_eval_async(self, output, expected=None, **kwargs):
-        return await self._judge_async(output, expected, **kwargs)
-
-    def _run_eval_sync(self, output, expected=None, **kwargs):
-        return self._judge_sync(output, expected, **kwargs)
-
-    async def _judge_async(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return await super()._run_eval_async(prepared["output"], prepared["expected"], **kwargs)
-
-    def _judge_sync(self, output, expected, **kwargs):
-        prepared = self._prepare(output, expected)
-        if isinstance(prepared, Score):
-            return prepared
-        return super()._run_eval_sync(prepared["output"], prepared["expected"], **kwargs)
 
     def _prepare(self, output, expected) -> dict[str, Any] | Score:
         actual = extract_last_query_funnel_input(output)
         if actual is None:
             return Score(
                 name=self._name(),
-                score=None,
+                score=0.0,
                 metadata={"reason": "Agent never ran query-funnel successfully"},
             )
         prompt = _extract_user_prompt(output)
@@ -576,6 +504,6 @@ Are the time range AND the conversion window in the actual query consistent with
 """.strip(),
             choice_scores=BINARY_CHOICE_SCORES,
             model=_JUDGE_MODEL,
-            max_tokens=512,
+            max_completion_tokens=512,
             **kwargs,
         )

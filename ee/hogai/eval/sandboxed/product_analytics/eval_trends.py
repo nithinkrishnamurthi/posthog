@@ -45,7 +45,7 @@ def _trends_case(
         name=name,
         prompt=prompt,
         expected={
-            "trends_query": query.model_dump(exclude_none=True),
+            "trends_query": query.model_dump(exclude_none=True, mode="json"),
         },
     )
 
