@@ -37,7 +37,7 @@
             <stream_flush_interval_ms>500</stream_flush_interval_ms>
 
             <!-- Development performance optimizations -->
-            <max_threads>4</max_threads>
+            <max_threads>2</max_threads>
             <background_merges_mutations_concurrency_ratio>1</background_merges_mutations_concurrency_ratio>
 
         </default>
