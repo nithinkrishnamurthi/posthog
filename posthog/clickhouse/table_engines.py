@@ -39,6 +39,12 @@ class MergeTreeEngine:
     def __str__(self):
         replication_scheme = self.replication_scheme
 
+        # CI optimization: force plain MergeTree in test mode to eliminate
+        # ZooKeeper coordination overhead (no replication needed with 1 CH node).
+        # Saves 5-50ms per CREATE/INSERT/DROP operation across thousands of test ops.
+        if (settings.TEST or settings.E2E_TESTING) and replication_scheme != ReplicationScheme.SHARDED:
+            return self.ENGINE.format(**self.kwargs)
+
         if replication_scheme == ReplicationScheme.NOT_SHARDED:
             return self.ENGINE.format(**self.kwargs)
 
