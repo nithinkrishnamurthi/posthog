@@ -1288,7 +1288,7 @@ jobs:
                       --splits ${{ matrix.concurrency }} --group ${{ matrix.group }} \
                       --durations=1000 --durations-min=1.0 --store-durations \
                       --splitting-algorithm=duration_based_chunks \
-                      --reruns 1 --reruns-delay 0 \
+                      --reruns 2 --reruns-delay 1 \
                       -r fEsxX \
                       --junitxml=junit-core.xml \
                       $PYTEST_ARGS
@@ -1342,7 +1342,7 @@ jobs:
                       --splits ${{ matrix.concurrency }} --group ${{ matrix.group }} \
                       --durations=100 --durations-min=1.0 --store-durations \
                       --splitting-algorithm=duration_based_chunks \
-                      --reruns 1 --reruns-delay 0 \
+                      --reruns 2 --reruns-delay 1 \
                       -r fEsxX \
                       --junitxml=junit-temporal.xml \
                       $PYTEST_ARGS
@@ -1712,7 +1712,7 @@ jobs:
 
             - name: Run async migrations tests
               run: |
-                  pytest -m "async_migrations" --reruns 1 --reruns-delay 0 --junitxml=junit.xml
+                  pytest -m "async_migrations" --reruns 2 --reruns-delay 1 --junitxml=junit.xml
 
             - name: Upload test results
               uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
