@@ -151,7 +151,11 @@ class ExternalDataSchemaSerializer(serializers.ModelSerializer):
         ret = super().to_representation(instance)
         ret["sync_type"] = ExternalDataSchema.SyncType(instance.sync_type) if instance.sync_type is not None else None
         ret["sync_frequency"] = sync_frequency_interval_to_sync_frequency(instance.sync_frequency_interval)
-        ret["sync_time_of_day"] = instance.sync_time_of_day
+        ret["sync_time_of_day"] = (
+            self.fields["sync_time_of_day"].to_representation(instance.sync_time_of_day)
+            if instance.sync_time_of_day
+            else None
+        )
         ret["incremental_field"] = (
             instance.sync_type_config.get("incremental_field") if instance.sync_type_config else None
         )
