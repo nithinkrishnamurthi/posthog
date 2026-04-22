@@ -1,0 +1,380 @@
+name: Vetter Validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: read
+
+# Mirrors upstream ci-e2e-playwright.yml. Anything missing here turns into
+# a false positive when vetter asks the running app questions.
+env:
+  SECRET_KEY: '6b01eee4f945ca25045b5aab440b953461faf08693a9abbf1166dc7c6b9772da'
+  REDIS_URL: redis://localhost
+  DATABASE_URL: postgres://posthog:posthog@localhost:5432/posthog_e2e_test
+  PERSONS_DB_WRITER_URL: postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test
+  KAFKA_HOSTS: kafka:9092
+  DISABLE_SECURE_SSL_REDIRECT: "1"
+  SECURE_COOKIES: "0"
+  OPT_OUT_CAPTURE: "0"
+  E2E_TESTING: "1"
+  SKIP_SERVICE_VERSION_REQUIREMENTS: "1"
+  EMAIL_HOST: email.test.posthog.net
+  SITE_URL: http://localhost:8000
+  NO_RESTART_LOOP: "1"
+  OBJECT_STORAGE_ENABLED: "1"
+  OBJECT_STORAGE_ENDPOINT: http://localhost:19000
+  OBJECT_STORAGE_ACCESS_KEY_ID: object_storage_root_user
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: object_storage_root_password
+  CELERY_METRICS_PORT: "8999"
+  CLOUD_DEPLOYMENT: E2E
+  CLICKHOUSE_HOST: localhost
+  CLICKHOUSE_SECURE: "False"
+  CLICKHOUSE_VERIFY: "False"
+  CLICKHOUSE_DATABASE: posthog_test
+  POSTHOG_DB_NAME: posthog_e2e_test
+  POSTHOG_PERSONS_DB_NAME: posthog_persons_e2e_test
+  PGHOST: localhost
+  PGUSER: posthog
+  PGPASSWORD: posthog
+  PGPORT: "5432"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect PR context
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          git diff "$BASE_SHA..$HEAD_SHA" > /tmp/pr.diff
+          gh pr view "$PR_NUMBER" --json title,body -q '.title + "\n\n" + (.body // "")' > /tmp/pr.summary
+          ticket_issue=$(grep -iEo '(fixes|closes|resolves) #[0-9]+' /tmp/pr.summary | head -1 | grep -Eo '[0-9]+' || true)
+          if [ -n "$ticket_issue" ]; then
+            gh issue view "$ticket_issue" --json title,body -q '.title + "\n\n" + (.body // "")' > /tmp/pr.ticket
+          else
+            cp /tmp/pr.summary /tmp/pr.ticket
+          fi
+
+      - name: Add service hostnames
+        run: echo "127.0.0.1 db redis7 kafka clickhouse clickhouse-coordinator objectstorage seaweedfs temporal" | sudo tee -a /etc/hosts
+
+      - name: Start Docker services
+        run: |
+          set -euo pipefail
+          # Older bases may lack this kludge; ignore if absent.
+          cp posthog/user_scripts/latest_user_defined_function.xml docker/clickhouse/user_defined_function.xml || true
+          docker compose -f docker-compose.dev.yml down || true
+          docker compose -f docker-compose.dev.yml up -d
+          # Wait for all services with healthchecks to report healthy. Older
+          # base SHAs predate bin/ci-wait-for-docker, so poll `docker compose ps`
+          # directly.
+          for i in $(seq 1 60); do
+            status=$(docker compose -f docker-compose.dev.yml ps --format json 2>/dev/null || echo "")
+            starting=$(echo "$status" | jq -rs '[.[] | select(.Health == "starting" or .Health == "unhealthy")] | length' 2>/dev/null || echo "0")
+            if [ "${starting:-0}" = "0" ]; then
+              echo "all services ready after ${i} polls"; break
+            fi
+            echo "[$i] services still starting/unhealthy: $starting"
+            sleep 5
+          done
+          docker compose -f docker-compose.dev.yml ps
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.10.2"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install SAML deps
+        run: sudo apt-get update && sudo apt-get install -y libxml2-dev libxmlsec1-dev libxmlsec1-openssl
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install Python deps
+        run: |
+          uv sync --frozen --dev
+          # Expose the venv binaries for subsequent steps that call `python`/`manage.py` directly.
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Set up needed files
+        run: |
+          mkdir -p frontend/dist
+          touch frontend/dist/index.html frontend/dist/layout.html frontend/dist/exporter.html
+          [ -x ./bin/download-mmdb ] && ./bin/download-mmdb || echo "skipping mmdb (not present in this base)"
+
+      - name: Install frontend deps
+        run: |
+          set -euxo pipefail
+          # Older bases may or may not have the plugin-transpiler workspace.
+          if pnpm --filter=@posthog/plugin-transpiler... install --frozen-lockfile 2>/dev/null; then
+            bin/turbo --filter=@posthog/plugin-transpiler build || true
+          fi
+          pnpm --filter=@posthog/frontend... install --frozen-lockfile
+
+      - name: Build frontend
+        run: |
+          set -euxo pipefail
+          # Build transitive deps (tailwind, ui, etc.) before building the frontend.
+          # turbo respects package.json dependencies, so this covers deps regardless
+          # of which era the base SHA is from.
+          bin/turbo run build --filter=@posthog/frontend
+          cp frontend/node_modules/@posthog/rrweb/dist/image-bitmap-data-url-worker-*.js.map frontend/dist/ 2>/dev/null || true
+          python manage.py collectstatic --noinput
+
+      - name: Install Rust + sqlx-cli
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          . "$HOME/.cargo/env"
+          cargo install sqlx-cli --version 0.8.0 --features postgres --no-default-features --locked
+
+      - name: Create DB + migrations + setup_dev
+        run: |
+          set -euo pipefail
+          createdb posthog_e2e_test || true
+          python manage.py migrate --noinput
+          . "$HOME/.cargo/env"
+          PERSONS_DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test"
+          sqlx database create -D "$PERSONS_DATABASE_URL"
+          sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/
+          for i in $(seq 1 10); do
+            if printf 'SELECT 1' | curl -fsS 'http://localhost:8123/' --data-binary @-; then break; fi
+            sleep 3
+          done
+          printf 'DROP DATABASE IF EXISTS posthog_test SYNC' | curl -fsS 'http://localhost:8123/' --data-binary @-
+          printf 'CREATE DATABASE posthog_test' | curl -fsS 'http://localhost:8123/' --data-binary @-
+          python manage.py migrate_clickhouse 2>&1
+          python manage.py setup_dev
+
+      - name: Source celery queues
+        run: |
+          if [ -f ./bin/celery-queues.env ]; then
+            source ./bin/celery-queues.env
+            echo "CELERY_WORKER_QUEUES=$CELERY_WORKER_QUEUES" >> "$GITHUB_ENV"
+          fi
+
+      - name: Start PostHog web + workers
+        run: |
+          # Older bases don't have start_temporal_worker or granian; use whatever's present.
+          python manage.py run_autoreload_celery --type=worker &> /tmp/celery.log &
+          python manage.py start_temporal_worker --task-queue analytics-platform-task-queue &> /tmp/temporal-worker.log 2>&1 || true &
+          if python -c "import granian" 2>/dev/null; then
+            python -m granian --interface asgi posthog.asgi:application --host 0.0.0.0 --port 8000 --log-level debug --workers 2 &> /tmp/server.log &
+          else
+            python manage.py runserver 0.0.0.0:8000 &> /tmp/server.log &
+          fi
+
+      - name: Wait for PostHog
+        uses: iFaxity/wait-on-action@v1
+        with:
+          resource: http://localhost:8000
+          timeout: 240000
+          interval: 2000
+
+      # ── Vetter: daemon + tunnel + register ──────────────────────────
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build + start valid daemon
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: "0"
+        run: |
+          set -euo pipefail
+          DAEMON_TOKEN=$(openssl rand -hex 16)
+          echo "DAEMON_TOKEN=$DAEMON_TOKEN" >> "$GITHUB_ENV"
+          git clone --depth 1 https://github.com/nithinkrishnamurthi/valid /tmp/valid
+          (cd /tmp/valid/daemon && go build -o /tmp/daemon .)
+          (cd /tmp/valid/valid-mcp && npm ci && npm run build)
+          cat >/tmp/daemon-mcp.json <<EOF
+          {"mcpServers":{"valid":{"command":"node","args":["/tmp/valid/valid-mcp/dist/index.js"]}}}
+          EOF
+          DAEMON_TOKEN="$DAEMON_TOKEN" nohup /tmp/daemon \
+            --port 9090 --mcp-config /tmp/daemon-mcp.json \
+            > /tmp/daemon.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://localhost:9090/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://localhost:9090/health
+
+      - name: Open cloudflared tunnel
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /usr/local/bin/cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x /usr/local/bin/cloudflared
+          nohup cloudflared tunnel --no-autoupdate --url http://localhost:9090 \
+            > /tmp/cloudflared.log 2>&1 &
+          for i in $(seq 1 30); do
+            url=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | head -1 || true)
+            if [ -n "$url" ]; then
+              echo "TUNNEL_URL=$url" >> "$GITHUB_ENV"
+              export TUNNEL_URL="$url"
+              echo "tunnel: $url"; break
+            fi
+            sleep 2
+          done
+          [ -n "${TUNNEL_URL:-}" ] || { echo "tunnel never opened" >&2; cat /tmp/cloudflared.log >&2; exit 1; }
+
+      - name: Create vetter env
+        env:
+          VETTER_API_KEY: ${{ secrets.VETTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          resp=$(curl -fsSL -X POST "https://api.getvetter.dev/environments" \
+            -H "Authorization: Bearer ${VETTER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"mode":"external"}')
+          env_id=$(echo "$resp" | jq -r .id)
+          [ -n "$env_id" ] && [ "$env_id" != "null" ] || { echo "no env id: $resp" >&2; exit 1; }
+          echo "VETTER_ENV_ID=$env_id" >> "$GITHUB_ENV"
+          echo "created vetter env: $env_id"
+
+      - name: Register daemon with vetter
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          name="ci-${{ github.repository_owner }}-${{ github.event.repository.name }}-pr${PR_NUMBER}-${{ github.run_id }}"
+          echo "DAEMON_NAME=$name" >> "$GITHUB_ENV"
+          curl -fsSL -X POST "https://api.getvetter.dev/register" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg env "$VETTER_ENV_ID" --arg name "$name" --arg addr "$TUNNEL_URL" --arg tok "$DAEMON_TOKEN" \
+                  '{env_id:$env, name:$name, address:$addr, token:$tok, description:"CI runner"}')"
+
+      - name: Kick off vetter run
+        id: vet
+        env:
+          VETTER_API_KEY: ${{ secrets.VETTER_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Write payload to a file so large diffs don't blow ARG_MAX on curl -d.
+          jq -n \
+            --rawfile ticket  /tmp/pr.ticket \
+            --rawfile summary /tmp/pr.summary \
+            --rawfile diff    /tmp/pr.diff \
+            '{ticket:$ticket, summary:$summary, diff:$diff}' > /tmp/vetter-payload.json
+          resp=$(curl -fsSL -X POST \
+            "https://api.getvetter.dev/environments/${VETTER_ENV_ID}/validate" \
+            -H "Authorization: Bearer ${VETTER_API_KEY}" \
+            -H "Content-Type: application/json" \
+            --data-binary @/tmp/vetter-payload.json)
+          run_id=$(echo "$resp" | jq -r .run_id)
+          [ -n "$run_id" ] && [ "$run_id" != "null" ] || { echo "no run_id: $resp" >&2; exit 1; }
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Poll for verdict
+        env:
+          VETTER_API_KEY: ${{ secrets.VETTER_API_KEY }}
+          RUN_ID: ${{ steps.vet.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 120); do
+            resp=$(curl -fsSL \
+              "https://api.getvetter.dev/environments/${VETTER_ENV_ID}/runs/${RUN_ID}" \
+              -H "Authorization: Bearer ${VETTER_API_KEY}")
+            status=$(echo "$resp" | jq -r .status)
+            echo "[$i] status=$status"
+            if [ "$status" = "completed" ]; then
+              echo "$resp" > "$GITHUB_WORKSPACE/verdict.json"
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "timed out" >&2; exit 1
+
+      - name: Teardown vetter env
+        if: always() && env.VETTER_ENV_ID != ''
+        env:
+          VETTER_API_KEY: ${{ secrets.VETTER_API_KEY }}
+        run: |
+          if [ -n "${DAEMON_NAME:-}" ]; then
+            curl -fsSL -X DELETE "https://api.getvetter.dev/register" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n --arg env "$VETTER_ENV_ID" --arg name "$DAEMON_NAME" \
+                    '{env_id:$env, name:$name}')" || true
+          fi
+          curl -fsSL -X DELETE "https://api.getvetter.dev/environments/${VETTER_ENV_ID}" \
+            -H "Authorization: Bearer ${VETTER_API_KEY}" || true
+
+      - name: Post PR comment
+        if: always() && hashFiles('verdict.json') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const v = JSON.parse(fs.readFileSync(`${process.env.GITHUB_WORKSPACE}/verdict.json`, 'utf8'));
+            const r = v.result || {};
+            const status = (r.status || 'unknown').toUpperCase();
+            const icon = r.status === 'pass' ? '✅' : r.status === 'fail' ? '❌' : '❓';
+            const reportImg = v.id
+              ? `![report](https://api.getvetter.dev/reports/${v.id})`
+              : '';
+            const details = JSON.stringify(r, null, 2);
+            const body = [
+              `## ${icon} Vetter: ${status}`,
+              '',
+              r.reason || '_no reason provided_',
+              '',
+              reportImg,
+              '',
+              '<details><summary>Full verdict</summary>',
+              '',
+              '```json',
+              details,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Upload verdict + logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vetter-logs-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: |
+            verdict.json
+            /tmp/server.log
+            /tmp/celery.log
+            /tmp/temporal-worker.log
+            /tmp/daemon.log
+            /tmp/cloudflared.log
+          if-no-files-found: ignore
+
+      - name: Logs on failure
+        if: failure()
+        run: |
+          echo "=== server ==="; tail -n 200 /tmp/server.log || true
+          echo "=== celery ==="; tail -n 100 /tmp/celery.log || true
+          echo "=== daemon ==="; tail -n 200 /tmp/daemon.log || true
+          echo "=== tunnel ==="; tail -n 100 /tmp/cloudflared.log || true
+          docker compose -f docker-compose.dev.yml ps || true
