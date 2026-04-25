@@ -15,7 +15,11 @@ env:
   SECRET_KEY: '6b01eee4f945ca25045b5aab440b953461faf08693a9abbf1166dc7c6b9772da'
   REDIS_URL: redis://localhost
   DATABASE_URL: postgres://posthog:posthog@localhost:5432/posthog_e2e_test
-  PERSONS_DB_WRITER_URL: postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test
+  # PERSONS_DB_WRITER_URL is set conditionally in the migrate step — only
+  # when the rust/persons_migrations/ directory exists at this base SHA.
+  # Older bases predate the persons-DB split; setting this env activates
+  # PersonDBRouter, which then tries to write posthog_person to a DB whose
+  # schema isn't created yet → migration crash on the squash step.
   KAFKA_HOSTS: kafka:9092
   DISABLE_SECURE_SSL_REDIRECT: "1"
   SECURE_COOKIES: "0"
@@ -154,11 +158,20 @@ jobs:
         run: |
           set -euo pipefail
           createdb posthog_e2e_test || true
+          # Persons DB split: only set up + activate if this base has the
+          # persons_migrations directory. Older bases (pre-split) crash on
+          # the squashed migration if PERSONS_DB_WRITER_URL is set.
+          if [ -d rust/persons_migrations ]; then
+            . "$HOME/.cargo/env"
+            PERSONS_DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test"
+            sqlx database create -D "$PERSONS_DATABASE_URL"
+            sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/
+            export PERSONS_DB_WRITER_URL="$PERSONS_DATABASE_URL"
+            echo "PERSONS_DB_WRITER_URL=$PERSONS_DATABASE_URL" >> "$GITHUB_ENV"
+          else
+            echo "rust/persons_migrations not present at this base — skipping persons DB split."
+          fi
           python manage.py migrate --noinput
-          . "$HOME/.cargo/env"
-          PERSONS_DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test"
-          sqlx database create -D "$PERSONS_DATABASE_URL"
-          sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/
           for i in $(seq 1 10); do
             if printf 'SELECT 1' | curl -fsS 'http://localhost:8123/' --data-binary @-; then break; fi
             sleep 3
