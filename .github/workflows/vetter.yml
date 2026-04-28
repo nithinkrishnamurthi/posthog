@@ -160,7 +160,15 @@ jobs:
           PERSONS_DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test"
           sqlx database create -D "$PERSONS_DATABASE_URL" || true
           sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/ 2>/dev/null || true
-          python manage.py migrate --noinput
+          # The initial squash may contain a RunSQL that references posthog_person
+          # before creating it (ordering bug in the squash). Fall back to syncdb
+          # to create tables from model definitions, then fake-initial to sync
+          # migration state, then run any remaining migrations normally.
+          python manage.py migrate --noinput 2>&1 || {
+            python manage.py migrate --run-syncdb 2>&1 || true
+            python manage.py migrate --fake-initial --noinput 2>&1 || true
+            python manage.py migrate --noinput 2>&1 || true
+          }
           for i in $(seq 1 10); do
             if printf 'SELECT 1' | curl -fsS 'http://localhost:8123/' --data-binary @-; then break; fi
             sleep 3
