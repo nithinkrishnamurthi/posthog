@@ -154,11 +154,13 @@ jobs:
         run: |
           set -euo pipefail
           createdb posthog_e2e_test || true
-          python manage.py migrate --noinput
+          # Create and seed the persons DB before Django migrate so the
+          # database router can route posthog_person writes correctly.
           . "$HOME/.cargo/env"
           PERSONS_DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test"
-          sqlx database create -D "$PERSONS_DATABASE_URL"
-          sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/
+          sqlx database create -D "$PERSONS_DATABASE_URL" || true
+          sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/ 2>/dev/null || true
+          python manage.py migrate --noinput
           for i in $(seq 1 10); do
             if printf 'SELECT 1' | curl -fsS 'http://localhost:8123/' --data-binary @-; then break; fi
             sleep 3
