@@ -15,7 +15,7 @@ env:
   SECRET_KEY: '6b01eee4f945ca25045b5aab440b953461faf08693a9abbf1166dc7c6b9772da'
   REDIS_URL: redis://localhost
   DATABASE_URL: postgres://posthog:posthog@localhost:5432/posthog_e2e_test
-  PERSONS_DB_WRITER_URL: postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test
+  PERSONS_DB_WRITER_URL: ""
   KAFKA_HOSTS: kafka:9092
   DISABLE_SECURE_SSL_REDIRECT: "1"
   SECURE_COOKIES: "0"
@@ -36,7 +36,7 @@ env:
   CLICKHOUSE_VERIFY: "False"
   CLICKHOUSE_DATABASE: posthog_test
   POSTHOG_DB_NAME: posthog_e2e_test
-  POSTHOG_PERSONS_DB_NAME: posthog_persons_e2e_test
+  POSTHOG_PERSONS_DB_NAME: ""
   PGHOST: localhost
   PGUSER: posthog
   PGPASSWORD: posthog
@@ -94,14 +94,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          version: "0.10.2"
-          enable-cache: true
-          cache-dependency-glob: uv.lock
+          python-version: "3.11"
 
       - name: Install SAML deps
         run: sudo apt-get update && sudo apt-get install -y libxml2-dev libxmlsec1-dev libxmlsec1-openssl
@@ -115,9 +108,18 @@ jobs:
 
       - name: Install Python deps
         run: |
-          uv sync --frozen --dev
-          # Expose the venv binaries for subsequent steps that call `python`/`manage.py` directly.
-          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          # Use whatever Python dep setup the codebase at this commit expects.
+          if [ -f uv.lock ]; then
+            pip install uv
+            # Match the uv version the repo was pinned to, if specified.
+            UV_VER=$(grep -r 'version: "0\.' .github/workflows/ci-backend.yml 2>/dev/null | grep -oP '0\.[0-9]+\.[0-9]+' | head -1 || true)
+            [ -n "$UV_VER" ] && pip install "uv==$UV_VER" || true
+            uv sync --frozen --dev
+            echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          else
+            pip install uv
+            uv pip install --system -r requirements.txt -r requirements-dev.txt
+          fi
 
       - name: Set up needed files
         run: |
@@ -144,31 +146,11 @@ jobs:
           cp frontend/node_modules/@posthog/rrweb/dist/image-bitmap-data-url-worker-*.js.map frontend/dist/ 2>/dev/null || true
           python manage.py collectstatic --noinput
 
-      - name: Install Rust + sqlx-cli
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          . "$HOME/.cargo/env"
-          cargo install sqlx-cli --version 0.8.0 --features postgres --no-default-features --locked
-
       - name: Create DB + migrations + setup_dev
         run: |
           set -euo pipefail
           createdb posthog_e2e_test || true
-          # Create and seed the persons DB before Django migrate so the
-          # database router can route posthog_person writes correctly.
-          . "$HOME/.cargo/env"
-          PERSONS_DATABASE_URL="postgres://posthog:posthog@localhost:5432/posthog_persons_e2e_test"
-          sqlx database create -D "$PERSONS_DATABASE_URL" || true
-          sqlx migrate run -D "$PERSONS_DATABASE_URL" --source rust/persons_migrations/ 2>/dev/null || true
-          # The initial squash may contain a RunSQL that references posthog_person
-          # before creating it (ordering bug in the squash). Fall back to syncdb
-          # to create tables from model definitions, then fake-initial to sync
-          # migration state, then run any remaining migrations normally.
-          python manage.py migrate --noinput 2>&1 || {
-            python manage.py migrate --run-syncdb 2>&1 || true
-            python manage.py migrate --fake-initial --noinput 2>&1 || true
-            python manage.py migrate --noinput 2>&1 || true
-          }
+          python manage.py migrate --noinput
           for i in $(seq 1 10); do
             if printf 'SELECT 1' | curl -fsS 'http://localhost:8123/' --data-binary @-; then break; fi
             sleep 3
