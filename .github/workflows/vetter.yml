@@ -153,10 +153,11 @@ jobs:
           else
             pip install uv
             # Old requirements.txt eras may pin source-only versions of packages
-            # that fail to compile under current system Python (e.g. yarl<1.9).
-            # Use a constraints file to floor them to wheel-compatible versions.
-            printf "yarl>=1.9.4\naiohttp>=3.9.0\n" > /tmp/epoch_pkg_floor.txt
-            uv pip install --system -c /tmp/epoch_pkg_floor.txt -r requirements.txt -r requirements-dev.txt
+            # that can't compile under Python 3.11 (e.g. yarl<1.9 references
+            # longintrepr.h which was removed in 3.10). Use --override (not
+            # --constraint) so the floor wins over exact pins in requirements.txt.
+            printf "yarl>=1.9.4\naiohttp>=3.9.0\n" > /tmp/epoch_pkg_overrides.txt
+            uv pip install --system --override /tmp/epoch_pkg_overrides.txt -r requirements.txt -r requirements-dev.txt
           fi
 
       - name: Set up needed files
@@ -177,10 +178,13 @@ jobs:
       - name: Build frontend
         run: |
           set -euxo pipefail
-          # Build transitive deps (tailwind, ui, etc.) before building the frontend.
-          # turbo respects package.json dependencies, so this covers deps regardless
-          # of which era the base SHA is from.
-          bin/turbo run build --filter=@posthog/frontend
+          if [ -x bin/turbo ]; then
+            # Modern era: turbo orchestrates the build graph.
+            bin/turbo run build --filter=@posthog/frontend
+          else
+            # Pre-turbo era: build directly in the frontend workspace.
+            cd frontend && pnpm run build
+          fi
           cp frontend/node_modules/@posthog/rrweb/dist/image-bitmap-data-url-worker-*.js.map frontend/dist/ 2>/dev/null || true
           python manage.py collectstatic --noinput
 
