@@ -152,7 +152,11 @@ jobs:
             echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
           else
             pip install uv
-            uv pip install --system -r requirements.txt -r requirements-dev.txt
+            # Old requirements.txt eras may pin source-only versions of packages
+            # that fail to compile under current system Python (e.g. yarl<1.9).
+            # Use a constraints file to floor them to wheel-compatible versions.
+            printf "yarl>=1.9.4\naiohttp>=3.9.0\n" > /tmp/epoch_pkg_floor.txt
+            uv pip install --system -c /tmp/epoch_pkg_floor.txt -r requirements.txt -r requirements-dev.txt
           fi
 
       - name: Set up needed files
