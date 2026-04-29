@@ -9,6 +9,12 @@ permissions:
   pull-requests: write
   issues: read
 
+# Serialize vetter runs so we never hit the service's concurrency cap.
+# New runs queue behind any in-progress run; none are cancelled.
+concurrency:
+  group: vetter-validation
+  cancel-in-progress: false
+
 # Mirrors upstream ci-e2e-playwright.yml. Anything missing here turns into
 # a false positive when vetter asks the running app questions.
 env:
